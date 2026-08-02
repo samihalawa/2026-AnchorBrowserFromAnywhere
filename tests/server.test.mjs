@@ -21,45 +21,61 @@ const TEST_CONTEXT = {
   priorities: ['Handle recent and relevant activity first.'],
 };
 
-test('classifies read-only Facebook requests without confirmation', () => {
+test('classifies read-only Facebook requests', () => {
   assert.deepEqual(classifyIntent('Find recent posts that need attention'), {
     kind: 'read',
-    needsConfirmation: false,
+    isWrite: false,
     summary: 'This request only reads or navigates Facebook.',
   });
-  assert.equal(classifyIntent('Tell me what is visible. Do not click or change anything.').needsConfirmation, false);
-  assert.equal(classifyIntent('Resume las notificaciones sin enviar mensajes.').needsConfirmation, false);
-  assert.equal(classifyIntent('Revisa publicaciones, comentarios y mensajes recientes.').needsConfirmation, false);
+  assert.equal(classifyIntent('Tell me what is visible. Do not click or change anything.').isWrite, false);
+  assert.equal(classifyIntent('Resume las notificaciones sin enviar mensajes.').isWrite, false);
+  assert.equal(classifyIntent('Revisa publicaciones, comentarios y mensajes recientes.').isWrite, false);
 });
 
-test('requires confirmation for visible Facebook writes in English and Spanish', () => {
-  assert.equal(classifyIntent('Comment on these three posts').needsConfirmation, true);
-  assert.equal(classifyIntent('Publicar esto en cuatro grupos').needsConfirmation, true);
-  assert.equal(classifyIntent('Send her a message').needsConfirmation, true);
-  assert.equal(classifyIntent('Revisa la cuenta y publícala.').needsConfirmation, true);
-  assert.equal(classifyIntent('Coméntalo y envíale una respuesta.').needsConfirmation, true);
-  assert.equal(classifyIntent('Súbela y luego elimínala.').needsConfirmation, true);
-  assert.equal(classifyIntent('Do not publish or change anything.').needsConfirmation, false);
+test('classifies visible Facebook writes in English and Spanish', () => {
+  assert.equal(classifyIntent('Comment on these three posts').isWrite, true);
+  assert.equal(classifyIntent('Publicar esto en cuatro grupos').isWrite, true);
+  assert.equal(classifyIntent('Send her a message').isWrite, true);
+  assert.equal(classifyIntent('Revisa la cuenta y publícala.').isWrite, true);
+  assert.equal(classifyIntent('Coméntalo y envíale una respuesta.').isWrite, true);
+  assert.equal(classifyIntent('Súbela y luego elimínala.').isWrite, true);
+  assert.equal(classifyIntent('Do not publish or change anything.').isWrite, false);
 });
 
-test('the run endpoint rejects an unconfirmed conjugated write before touching Anchor', async () => {
-  let anchorCalls = 0;
+test('the run endpoint starts a requested write directly', async () => {
+  const calls = [];
   const server = createApp({
-    anchorRequest: async () => {
-      anchorCalls += 1;
-      throw new Error('Anchor must not be called before confirmation.');
+    anchorRequest: async (path, options = {}) => {
+      calls.push({ path, options });
+      if (path === '/sessions/live-session') {
+        return { session_id: 'live-session', status: 'running', tags: ['anchorbrowser-from-anywhere', 'facebook', SESSION_USER] };
+      }
+      if (path === '/tools/perform-web-task?sessionId=live-session' && options.method === 'POST') {
+        return { workflow_id: 'direct-write', status: 'running' };
+      }
+      throw new Error(`Unexpected Anchor request: ${path}`);
     },
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const response = await fetch(`http://127.0.0.1:${server.address().port}/api/run`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-access-key': process.env.APP_ACCESS_KEY || '' },
-    body: JSON.stringify({ clientId: 'proof', prompt: 'Revisa la cuenta y publícala.' }),
+    body: JSON.stringify({
+      clientId: 'proof',
+      prompt: 'Revisa la cuenta y publícala.',
+      session: { sessionId: 'live-session', liveViewUrl: providerLiveViewUrl('live-session') },
+    }),
   });
   const payload = await response.json();
-  assert.equal(response.status, 409);
-  assert.equal(payload.needsConfirmation, true);
-  assert.equal(anchorCalls, 0);
+  assert.equal(response.status, 200);
+  assert.equal(payload.task.workflowId, 'direct-write');
+  const task = JSON.parse(calls.find((call) => call.path.startsWith('/tools/perform-web-task')).options.body);
+  assert.match(task.prompt, /explicitly requested this external action/i);
+  assert.match(task.prompt, /operating agent, not a fixed macro/i);
+  assert.match(task.prompt, /revise your plan when evidence changes/i);
+  assert.match(task.prompt, /suggested copy and historical context as provisional/i);
+  assert.match(task.prompt, /omit anything unsupported/i);
+  assert.match(task.prompt, /inspect the final Facebook preview/i);
   await new Promise((resolve) => server.close(resolve));
 });
 
@@ -196,7 +212,7 @@ test('agent can route an explicit Facebook request to the existing action pipeli
   });
   const payload = await response.json();
   assert.equal(payload.mode, 'action');
-  assert.equal(classifyIntent(payload.actionPrompt).needsConfirmation, true);
+  assert.equal(classifyIntent(payload.actionPrompt).isWrite, true);
   await new Promise((resolve) => server.close(resolve));
 });
 
@@ -340,13 +356,13 @@ test('client persists agent continuity and passes the current session back to ac
   assert.match(source, /anchor-chat-history/);
   assert.match(source, /anchor-active-workflow/);
   assert.match(source, /anchor-action-queue/);
-  assert.match(source, /anchor-pending-prompt/);
+  assert.doesNotMatch(source, /anchor-pending-prompt/);
   assert.match(source, /anchor-mobile-view/);
   assert.match(source, /anchor-browser-collapsed/);
   assert.match(source, /anchor-chat-draft/);
   assert.match(source, /session: state\.session/);
   assert.match(source, /resumeWorkflow/);
-  assert.match(source, /restorePendingConfirmation/);
+  assert.doesNotMatch(source, /restorePendingConfirmation/);
   assert.match(source, /loadSessionHistory\(true\)/);
   assert.match(source, /CLIENT_IDLE_CLOSE_MS = 30 \* 60 \* 1000/);
   assert.match(source, /anchor-browser-share/);
@@ -370,6 +386,7 @@ test('mobile UI exposes chat, live browser, native full screen, reconnect, wake 
   assert.match(html, /id="stage-controls"/);
   assert.match(html, /id="refresh-live-view"/);
   assert.match(html, /id="stage-fullscreen"/);
+  assert.doesNotMatch(html, /id="confirm-dialog"/);
   assert.match(html, /allowfullscreen loading="eager"/);
   assert.match(html, /View all sessions/);
   assert.match(html, /data-command="\/browser"/);
@@ -394,7 +411,7 @@ test('health exposes deployment identity without secrets', async () => {
   assert.equal(response.status, 200);
   assert.equal(payload.ok, true);
   assert.equal(payload.service, 'anchor-browser-from-anywhere');
-  assert.equal(payload.version, '1.8.1');
+  assert.equal(payload.version, '1.9.0');
   assert.equal(payload.agentContextVersion, 'test-runtime-config');
   assert.equal(payload.sessionUser, SESSION_USER);
   assert.equal('cookies' in payload, false);

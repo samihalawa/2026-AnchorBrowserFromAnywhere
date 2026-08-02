@@ -13,7 +13,6 @@ const state = {
   accessKey: sessionStorage.getItem('anchor-access-key') || '',
   clientId: localStorage.getItem('anchor-client-id') || crypto.randomUUID(),
   session: null,
-  pendingPrompt: localStorage.getItem('anchor-pending-prompt') || '',
   workflowId: null,
   history: readStoredJSON('anchor-chat-history', []),
   workflow: readStoredJSON('anchor-active-workflow', null),
@@ -34,7 +33,6 @@ if (!Array.isArray(state.actionQueue)) state.actionQueue = [];
 localStorage.setItem('anchor-client-id', state.clientId);
 
 const unlockDialog = $('#unlock-dialog');
-const confirmDialog = $('#confirm-dialog');
 const connection = $('#connection');
 const browserStage = $('#browser-stage');
 const browserEmpty = $('#browser-empty');
@@ -54,12 +52,6 @@ function persistHistory() {
 
 function persistQueue() {
   localStorage.setItem('anchor-action-queue', JSON.stringify(state.actionQueue));
-}
-
-function savePendingPrompt(prompt = '') {
-  state.pendingPrompt = String(prompt || '');
-  if (state.pendingPrompt) localStorage.setItem('anchor-pending-prompt', state.pendingPrompt);
-  else localStorage.removeItem('anchor-pending-prompt');
 }
 
 function saveWorkflow(workflow) {
@@ -233,14 +225,6 @@ async function syncWakeLock() {
   } finally {
     wakeLockRequest = null;
   }
-}
-
-function restorePendingConfirmation() {
-  if (!state.pendingPrompt || state.workflowId || confirmDialog.open) return;
-  $('#confirm-prompt').textContent = state.pendingPrompt;
-  confirmDialog.returnValue = '';
-  confirmDialog.showModal();
-  setStatus('Waiting for confirmation');
 }
 
 async function api(path, options = {}) {
@@ -604,12 +588,12 @@ async function runNextAction() {
   const next = state.actionQueue.shift();
   persistQueue();
   addMessage('Continuing with the next queued request in the same browser session.', 'assistant');
-  await execute(next.prompt, next.confirmed);
+  await execute(next.prompt);
 }
 
-async function execute(prompt, confirmed = false) {
+async function execute(prompt) {
   if (state.workflowId) {
-    state.actionQueue.push({ prompt, confirmed });
+    state.actionQueue.push({ prompt });
     persistQueue();
     addMessage('I’m already working in this browser. I queued that request and will continue in the same session when the current action finishes.');
     return;
@@ -620,11 +604,11 @@ async function execute(prompt, confirmed = false) {
   try {
     const payload = await api('/api/run', {
       method: 'POST',
-      body: JSON.stringify({ clientId: state.clientId, prompt, confirmed, history: state.history.slice(-12), cookies: state.cookies, session: state.session }),
+      body: JSON.stringify({ clientId: state.clientId, prompt, history: state.history.slice(-12), cookies: state.cookies, session: state.session }),
     });
     if (payload.session?.liveViewUrl && liveBrowser.src !== payload.session.liveViewUrl) liveBrowser.src = payload.session.liveViewUrl;
     if (payload.task.workflowId) {
-      saveWorkflow({ workflowId: payload.task.workflowId, prompt, confirmed, sessionId: state.session?.sessionId || '' });
+      saveWorkflow({ workflowId: payload.task.workflowId, prompt, sessionId: state.session?.sessionId || '' });
       await pollTask(payload.task.workflowId, bubble);
     } else {
       bubble.textContent = payload.task.result || 'The browser task completed.';
@@ -656,16 +640,7 @@ async function submitPrompt(prompt) {
     return;
   }
   const actionPrompt = agent.actionPrompt || prompt;
-  const preview = await api('/api/preview', { method: 'POST', body: JSON.stringify({ prompt: actionPrompt }) });
-  if (preview.needsConfirmation) {
-    savePendingPrompt(actionPrompt);
-    $('#confirm-prompt').textContent = actionPrompt;
-    confirmDialog.returnValue = '';
-    confirmDialog.showModal();
-    setStatus('Waiting for confirmation');
-    return;
-  }
-  await execute(actionPrompt, false);
+  await execute(actionPrompt);
 }
 
 async function handleCommand(prompt) {
@@ -825,16 +800,6 @@ workspaceResizer.addEventListener('keydown', (event) => {
   setBrowserShare(state.browserShare + (event.key === 'ArrowRight' ? 3 : -3));
 });
 
-$('#confirm-run').addEventListener('click', () => {
-  const prompt = state.pendingPrompt;
-  savePendingPrompt('');
-  if (prompt) execute(prompt, true);
-});
-
-confirmDialog.addEventListener('close', () => {
-  if (confirmDialog.returnValue !== 'confirm') savePendingPrompt('');
-});
-
 $('#unlock-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   state.accessKey = $('#access-key').value;
@@ -847,7 +812,6 @@ $('#unlock-form').addEventListener('submit', async (event) => {
     await loadDefaultCookies();
     await loadSessionHistory(true);
     void resumeWorkflow();
-    restorePendingConfirmation();
   } catch (error) {
     $('#unlock-error').textContent = error.status === 401 ? 'That access key is not correct.' : error.message;
   }
@@ -892,7 +856,6 @@ async function boot() {
     await loadDefaultCookies();
     await loadSessionHistory(true);
     void resumeWorkflow();
-    restorePendingConfirmation();
   } catch (error) {
     if (error.status === 401) {
       sessionStorage.removeItem('anchor-access-key');

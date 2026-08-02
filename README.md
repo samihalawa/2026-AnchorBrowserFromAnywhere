@@ -14,14 +14,16 @@ Production: https://anchorbrowser.megawebs.com
 - Accepts natural-language tasks from a chat-style interface.
 - Loads optional persistent agent context from `FACEBOOK_AGENT_CONTEXT` at runtime.
 - Resolves broad actions from configured context plus the live account instead of embedding identity, campaign, contact, or content assumptions in the application.
-- Keeps chat history, drafts, pending confirmations, selected workspace view, the active workflow, queued actions, and the exact Anchor iframe session across refreshes and deployments.
+- Keeps chat history, drafts, selected workspace view, the active workflow, queued actions, and the exact Anchor iframe session across refreshes and deployments.
 - Restores the primary browser and chat in place after reload, with a clear live/busy/attention status and a loading state while Anchor reconnects.
 - Keeps the conversation composer large and reachable on phones, collapses secondary shortcuts behind `More`, and exposes the live browser as a dedicated mobile view with in-app full screen, safe-area controls, live-view reconnect, and screen wake lock while it is open.
 - Lets desktop users resize the browser/chat split and remembers their preferred width on that device.
 - Lets an active browser task be paused and resumed without ending its persistent Anchor session.
 - Lets the Anchor `browser-use` agent autonomously navigate and complete multi-step Facebook requests in that same session.
+- Uses the chat model as a persistent controller and the live browser model as an operating agent: both can make context-grounded decisions, inspect results, and revise their approach instead of replaying fixed click macros.
 - Runs read-only requests immediately.
-- Requires a second explicit confirmation before posts, comments, messages, reactions, joins, edits, or deletes.
+- Executes clear Facebook action requests directly, with Stop/Pause available while the browser agent is working.
+- For image and Story requests, requires relevant visual media, short legible overlay text, and a final Facebook preview check instead of a plain gradient or text-only fallback.
 - Lets the user paste Cookie-Editor JSON once and saves it in that device's local storage.
 - Sends the cookie JSON only when creating/running that user's session, then injects it before Facebook opens.
 - Provides mobile Agent/Live Browser views, native full screen with a new-tab fallback, compact hidden history with current/recording badges, recording playback, and `/browser`, `/cookies`, `/new`, `/chat`, and `/session` commands. `/new` creates a parallel session without ending the current one.

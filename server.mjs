@@ -35,15 +35,15 @@ const MUTATION_WORDS = /\b(?:post(?:ed|ing)?|publish(?:es|ed|ing)?|comment(?:ed|
 
 export function classifyIntent(prompt) {
   const text = String(prompt || '').trim();
-  if (!text) return { kind: 'empty', needsConfirmation: false };
+  if (!text) return { kind: 'empty', isWrite: false };
   const actionableText = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\b(?:do not|don't|dont|never|without)\b[^.!?]*/gi, '')
     .replace(/\b(?:no|sin)\b[^.!?]*/gi, '');
-  const needsConfirmation = MUTATION_WORDS.test(actionableText);
+  const isWrite = MUTATION_WORDS.test(actionableText);
   return {
-    kind: needsConfirmation ? 'write' : 'read',
-    needsConfirmation,
-    summary: needsConfirmation
+    kind: isWrite ? 'write' : 'read',
+    isWrite,
+    summary: isWrite
       ? 'This request will change something on Facebook.'
       : 'This request only reads or navigates Facebook.',
   };
@@ -407,17 +407,20 @@ function agentInstruction(context) {
     'Questions about you, your capabilities, your status, what you are doing, or the current task are always conversation. Never start or queue a browser action for those questions.',
     'Choose mode "action" only when the user clearly asks you to inspect, navigate, search, read, or change Facebook now.',
     'A request to draft or improve text is conversation, not an action, unless the user explicitly asks you to publish or send it.',
-    'Use recent conversation to resolve short follow-ups such as "do it".',
+    'Use recent conversation to resolve short follow-ups such as "do it". Preserve the exact action type, subject, target, and constraints from the latest unresolved user goal unless the user explicitly changes them.',
     'For mode "chat", set actionPrompt to an empty string.',
     'For mode "action", reply briefly about what you are about to do and provide a self-contained plain-language actionPrompt for the browser.',
-    'The app handles required confirmation after your decision. Never tell the browser agent to request, invoke, or wait for another confirmation.',
+    'Act as the persistent controller, not a command classifier: understand the outcome, decide whether browser tools are needed, make reasonable choices from context and live evidence, and adapt the plan when the observed page differs from expectations.',
+    'The app executes clear action requests directly. Never add another approval step.',
     'Describe the complete outcome, not individual browser steps; the browser agent decides the navigation and tools needed autonomously.',
     'Use the persistent Facebook context and inspect the live account to resolve content, target, tone, priority, and existing-media choices whenever possible.',
+    'Never turn historical context into a current factual claim. Mark time-sensitive details for live verification and instruct the browser agent to omit any claim it cannot verify.',
     'A clear high-level request with a complete outcome is actionable: resolve implementation details from configured context and current Facebook activity instead of asking the user to repeat information already available there.',
     'If an indispensable detail still truly prevents action after using context and live state, ask for it naturally in chat. Login, two-factor, CAPTCHA, or manual review can be completed by the user in the same live browser session.',
     'Whenever your reply asks the user for a missing detail, choose mode "chat" and leave actionPrompt empty. Never launch the browser while waiting for that answer.',
     'Obey requested output formats. If the user asks for JSON, return valid JSON text in reply and preserve the subject from recent conversation.',
     'The actionPrompt must include the complete requested outcome, including any publish, comment, send, or other visible change; never replace it with only a search step.',
+    'When the user requests an image, visual improvement, or story, the actionPrompt must require relevant visual media and a visible preview check. Never promise an image while routing a text-only result.',
     'Never put JSON, function calls, tool syntax, or code in actionPrompt.',
     'Never claim that a Facebook action completed; the browser tool will report the observed result.',
     'Use the user\'s language and keep replies concise.',
@@ -486,9 +489,12 @@ function executionPrompt(prompt, isWrite, history = [], context = FACEBOOK_AGENT
     conversation ? `Recent conversation for context:\n${conversation}` : '',
     facebookContextForRequest(prompt, context),
     `User request: ${prompt}`,
+    'You are the operating agent, not a fixed macro. Inspect the current page, choose the best path to the requested outcome, revise your plan when evidence changes, and verify the result at the visible Facebook surface.',
+    'Treat suggested copy and historical context as provisional. Verify time-sensitive claims such as availability, price, dates, promotions, and recipient identity in the live account, and omit anything unsupported.',
     isWrite
-      ? 'The user reviewed and explicitly confirmed this exact external action. Execute only that action without requesting or invoking another confirmation.'
+      ? 'The user explicitly requested this external action in chat. Execute exactly that action directly.'
       : 'This is read-only. Do not post, comment, message, join, react, edit, or delete anything.',
+    'For image, story, or visual-design tasks, inspect the final Facebook preview before sharing. It must visibly contain relevant media, use a short legible overlay, and avoid a plain color or gradient with dense text when the user requested an image.',
     'Use the existing logged-in account. Ask for human input only when login, two-factor authentication, CAPTCHA, or an indispensable missing value blocks progress; keep the current page open for that input.',
     'At the end, report the exact Facebook page, what visibly happened, and any pending admin approval.',
   ].filter(Boolean).join('\n');
@@ -500,7 +506,7 @@ async function runTask(session, prompt, history, context, anchorRequest = anchor
   const result = await anchorRequest(url, {
     method: 'POST',
     body: JSON.stringify({
-      prompt: executionPrompt(prompt, intent.needsConfirmation, history, context),
+      prompt: executionPrompt(prompt, intent.isWrite, history, context),
       agent: 'browser-use',
       max_steps: 120,
       detect_elements: true,
@@ -537,7 +543,7 @@ export function createApp({ agentResponder = converseWithGemini, agentContext = 
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     try {
       if (url.pathname === '/health') {
-        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), agentConfigured: Boolean(GEMINI_API_KEY), agentContextVersion: agentContext.version || 'environment', sessionUser: SESSION_USER, version: '1.8.1' });
+        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), agentConfigured: Boolean(GEMINI_API_KEY), agentContextVersion: agentContext.version || 'environment', sessionUser: SESSION_USER, version: '1.9.0' });
       }
       if (url.pathname.startsWith('/api/') && !authorized(req)) return json(res, 401, { ok: false, error: 'Access key required.' });
 
@@ -647,7 +653,6 @@ export function createApp({ agentResponder = converseWithGemini, agentContext = 
         const clientId = String(input.clientId || '').trim();
         const intent = classifyIntent(prompt);
         if (!prompt || !clientId) return json(res, 400, { ok: false, error: 'Missing request or browser session.' });
-        if (intent.needsConfirmation && input.confirmed !== true) return json(res, 409, { ok: false, needsConfirmation: true, prompt, ...intent });
         const session = await getOrCreateSession(clientId, input.cookies, input.session, anchorRequest, prepareFacebookSession);
         const task = await runTask(session, prompt, input.history, agentContext, anchorRequest);
         return json(res, 200, { ok: true, task, session: { sessionId: session.sessionId, liveViewUrl: session.liveViewUrl, authenticated: session.authenticated } });
