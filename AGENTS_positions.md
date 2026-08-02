@@ -1,8 +1,20 @@
 INDEX
+2026-08-02 | conversational agent routing | sending every chat turn directly to Anchor makes greetings create browser tasks | do route every turn through conversational AI and invoke Anchor only for an explicit Facebook action | don't treat every non-write message as a read-only browser command | verify hello returns a chat reply with no workflow, a follow-up preserves context, and an explicit write reaches confirmation
 2026-08-02 | Anchor session continuity | in-memory session state and shutdown cleanup discard a still-running remote browser, while author CSS can keep a hidden empty-state overlay visible | do persist the exact live-view metadata on-device, validate the Anchor session on restore, and enforce `[hidden]` | don't terminate remote sessions during app redeploy or trust the DOM property without rendered proof | verify reload keeps the same ID, New session changes it, End session completes it, and the iframe is visibly unobscured
 2026-08-02 | Coolify Docker health checks | the slim image omits both curl and wget, so a healthy Node process is rejected as unhealthy | do keep curl installed in the production image while Coolify health checks are enabled | don't infer an app crash from repeated `starting` checks | verify Coolify reports healthy and `/health` returns the expected JSON
 2026-08-02 | chatbot scope drift | presets can tempt a fixed-task dashboard instead of the requested conversational agent | do keep the unrestricted prompt and recent chat context as the primary control surface, with presets only as optional shortcuts | don't require users to choose from predefined Facebook actions | verify any free-form prompt reaches Anchor and its result returns to the chat
 2026-08-02 | injected cookies are not authenticated proof | a valid cookie array can still open Facebook's saved-profile chooser | do inject the user-pasted cookies before navigation and keep the live view interactive for login or 2FA | don't label the account connected from cookie count or homepage URL alone | verify the current page text or agent report shows an authenticated Facebook surface
+
+## 2026-08-02 | CURRENT
+
+- project/root: `/Users/samihalawa/git/PROJECTS_CODING/2026-AnchorBrowserFromAnywhere`
+- surface/workflow: conversational agent and optional Facebook browser tools
+- mistaken approach: `submitPrompt()` sent every message to `/api/run`, so even `hello` created an Anchor workflow and showed `Working in the live browser`
+- superior approach: Gemini handles ordinary conversation and returns an explicit `chat` or `action` decision; only `action` reaches Anchor, while Facebook writes still require confirmation
+- evidence: user browser screenshot plus `public/app.js`; local live responses classified `hello` and drafting as `chat`, then the follow-up `Now ... publish` as `action`
+- trigger terms: `hello starts task`, `doesn't talk`, `conversational agent`, `every message`, `tools`
+- do: prove chat, contextual follow-up, action routing, and confirmation separately; don't: infer an action from every non-write message
+- required verification: rendered production chat must answer `hello` without creating a workflow, then an explicit Facebook write must show the confirmation dialog
 
 ## 2026-08-02 | CURRENT
 

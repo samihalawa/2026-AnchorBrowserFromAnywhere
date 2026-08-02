@@ -18,6 +18,49 @@ test('requires confirmation for visible Facebook writes in English and Spanish',
   assert.equal(classifyIntent('Send her a message').needsConfirmation, true);
 });
 
+test('conversational messages return an agent reply without creating a browser task', async () => {
+  const calls = [];
+  const server = createApp({
+    agentResponder: async (message, history) => {
+      calls.push({ message, history });
+      return { mode: 'chat', reply: 'Hello! How can I help?', actionPrompt: '' };
+    },
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  const response = await fetch(`http://127.0.0.1:${address.port}/api/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-access-key': process.env.APP_ACCESS_KEY || '' },
+    body: JSON.stringify({ message: 'hello', history: [] }),
+  });
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.deepEqual(payload, { ok: true, mode: 'chat', reply: 'Hello! How can I help?', actionPrompt: '' });
+  assert.deepEqual(calls, [{ message: 'hello', history: [] }]);
+  await new Promise((resolve) => server.close(resolve));
+});
+
+test('agent can route an explicit Facebook request to the existing action pipeline', async () => {
+  const server = createApp({
+    agentResponder: async () => ({
+      mode: 'action',
+      reply: 'I’ll find one relevant post.',
+      actionPrompt: 'Find one relevant Facebook post and comment on it.',
+    }),
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  const response = await fetch(`http://127.0.0.1:${address.port}/api/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-access-key': process.env.APP_ACCESS_KEY || '' },
+    body: JSON.stringify({ message: 'Please comment on one relevant post.', history: [] }),
+  });
+  const payload = await response.json();
+  assert.equal(payload.mode, 'action');
+  assert.equal(classifyIntent(payload.actionPrompt).needsConfirmation, true);
+  await new Promise((resolve) => server.close(resolve));
+});
+
 test('only restores the matching Anchor live-view session URL', () => {
   const sessionId = 'f92c54ff-f51c-4962-ba2b-55c58f4fb328';
   assert.equal(recoverableLiveViewUrl(`https://live.anchorbrowser.io/?sessionId=${sessionId}`, sessionId), true);

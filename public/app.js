@@ -207,14 +207,27 @@ async function execute(prompt, confirmed = false) {
 
 async function submitPrompt(prompt) {
   addMessage(prompt, 'user');
-  const preview = await api('/api/preview', { method: 'POST', body: JSON.stringify({ prompt }) });
-  if (preview.needsConfirmation) {
-    state.pendingPrompt = prompt;
-    $('#confirm-prompt').textContent = prompt;
-    confirmDialog.showModal();
+  setStatus('Thinking…', 'busy');
+  const conversationHistory = state.history.slice(0, -1).slice(-10);
+  const agent = await api('/api/chat', {
+    method: 'POST',
+    body: JSON.stringify({ message: prompt, history: conversationHistory }),
+  });
+  addMessage(agent.reply);
+  if (agent.mode !== 'action') {
+    setStatus(state.session ? 'Browser live' : 'Ready', state.session ? 'live' : '');
     return;
   }
-  await execute(prompt, false);
+  const actionPrompt = agent.actionPrompt || prompt;
+  const preview = await api('/api/preview', { method: 'POST', body: JSON.stringify({ prompt: actionPrompt }) });
+  if (preview.needsConfirmation) {
+    state.pendingPrompt = actionPrompt;
+    $('#confirm-prompt').textContent = actionPrompt;
+    confirmDialog.showModal();
+    setStatus('Waiting for confirmation');
+    return;
+  }
+  await execute(actionPrompt, false);
 }
 
 $('#composer').addEventListener('submit', async (event) => {

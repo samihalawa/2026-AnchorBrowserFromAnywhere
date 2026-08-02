@@ -12,7 +12,10 @@ const HOST = process.env.HOST || '0.0.0.0';
 const ANCHOR_API_KEY = String(process.env.ANCHOR_API_KEY || process.env.ANCHORBROWSER_API_KEY || '').trim();
 const APP_ACCESS_KEY = String(process.env.APP_ACCESS_KEY || '').trim();
 const DEFAULT_FACEBOOK_COOKIES = String(process.env.FACEBOOK_COOKIES_JSON || '').trim();
+const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || '').trim();
+const GEMINI_MODEL = String(process.env.GEMINI_MODEL || 'gemini-3.6-flash').trim();
 const ANCHOR_API = 'https://api.anchorbrowser.io/v1';
+const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta';
 const sessions = new Map();
 
 const MUTATION_WORDS = /\b(post|publish|comment|reply|send|message|like|react|join|follow|invite|delete|remove|edit|change|upload|publica|publicar|comenta|comentar|responde|responder|envia|enviar|mensaje|unirse|seguir|elimina|editar|sube)\b/i;
@@ -264,6 +267,71 @@ function cleanHistory(value) {
   })).filter((item) => item.text);
 }
 
+function agentInstruction() {
+  return [
+    'You are Anchor, a warm conversational AI agent with optional Facebook browser tools.',
+    'Reply naturally to greetings, questions, brainstorming, explanations, and drafting requests without using a browser.',
+    'Choose mode "action" only when the user clearly asks you to inspect, navigate, search, read, or change Facebook now.',
+    'A request to draft or improve text is conversation, not an action, unless the user explicitly asks you to publish or send it.',
+    'Use recent conversation to resolve short follow-ups such as "do it".',
+    'For mode "chat", set actionPrompt to an empty string.',
+    'For mode "action", reply briefly about what you are about to do and provide a self-contained actionPrompt for the browser.',
+    'Never claim that a Facebook action completed; the browser tool will report the observed result.',
+    'Use the user\'s language and keep replies concise.',
+  ].join(' ');
+}
+
+function parseAgentDecision(payload) {
+  const text = payload?.candidates?.[0]?.content?.parts
+    ?.map((part) => part?.text || '')
+    .join('')
+    .trim();
+  if (!text) throw new Error('The conversational agent returned no reply.');
+  let decision;
+  try { decision = JSON.parse(text); } catch { throw new Error('The conversational agent returned an invalid reply.'); }
+  const mode = decision?.mode === 'action' ? 'action' : 'chat';
+  const reply = String(decision?.reply || '').trim();
+  const actionPrompt = mode === 'action' ? String(decision?.actionPrompt || '').trim() : '';
+  if (!reply) throw new Error('The conversational agent returned no reply.');
+  if (mode === 'action' && !actionPrompt) throw new Error('The conversational agent did not describe the requested browser action.');
+  return { mode, reply, actionPrompt };
+}
+
+async function converseWithGemini(message, history) {
+  if (!GEMINI_API_KEY) throw new Error('The conversational agent is not configured.');
+  const contents = cleanHistory(history).map((item) => ({
+    role: item.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: item.text }],
+  }));
+  contents.push({ role: 'user', parts: [{ text: message }] });
+  const response = await fetch(`${GEMINI_API}/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: agentInstruction() }] },
+      contents,
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            mode: { type: 'STRING', enum: ['chat', 'action'] },
+            reply: { type: 'STRING' },
+            actionPrompt: { type: 'STRING' },
+          },
+          required: ['mode', 'reply', 'actionPrompt'],
+        },
+      },
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = payload?.error?.message || `HTTP ${response.status}`;
+    throw new Error(`Conversational agent ${response.status}: ${String(detail).slice(0, 300)}`);
+  }
+  return parseAgentDecision(payload);
+}
+
 function executionPrompt(prompt, isWrite, history = []) {
   const conversation = cleanHistory(history)
     .map((item) => `${item.role === 'assistant' ? 'Agent' : 'User'}: ${item.text}`)
@@ -317,12 +385,12 @@ async function serveStatic(url, res) {
   }
 }
 
-export function createApp() {
+export function createApp({ agentResponder = converseWithGemini } = {}) {
   return createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     try {
       if (url.pathname === '/health') {
-        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), version: '1.0.0' });
+        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), agentConfigured: Boolean(GEMINI_API_KEY), version: '1.1.0' });
       }
       if (url.pathname.startsWith('/api/') && !authorized(req)) return json(res, 401, { ok: false, error: 'Access key required.' });
 
@@ -359,6 +427,14 @@ export function createApp() {
         const intent = classifyIntent(prompt);
         if (!prompt) return json(res, 400, { ok: false, error: 'Write a request first.' });
         return json(res, 200, { ok: true, prompt, ...intent });
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/chat') {
+        const input = await bodyJson(req);
+        const message = String(input.message || '').trim();
+        if (!message) return json(res, 400, { ok: false, error: 'Write a message first.' });
+        const decision = await agentResponder(message.slice(0, 4000), input.history);
+        return json(res, 200, { ok: true, ...decision });
       }
 
       if (req.method === 'POST' && url.pathname === '/api/run') {
