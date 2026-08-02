@@ -1,4 +1,5 @@
 INDEX
+2026-08-03 | confirmation across generated verb forms | matching only base-form mutation verbs lets conjugated or accented agent prompts bypass confirmation | do normalize diacritics, cover inflections and attached pronouns, and gate again on `/api/run` | don't rely only on the chat decision or client preview | verify the exact generated prompt returns 409 before any Anchor call and the real UI still shows confirmation
 2026-08-03 | configuration-only identity and business context | committed persona/campaign defaults make the agent brittle and leak one account into product behavior | do load session identity and agent context only from the ignored repo-root `.env`, then inspect live Facebook | don't commit account, campaign, contact, or action-specific fallbacks | verify a forbidden-string source sweep, runtime context version, configured session restoration, broad-action chat response, and confirmation
 2026-08-03 | SUPERSEDED context-grounded broad Facebook actions | demoting underspecified content actions to chat can create repetitive questions, but committed export-derived defaults were the wrong layer | do use runtime-configured context plus live state while retaining confirmation | don't add Story-specific or campaign-specific source fallbacks | verify the configured context reaches dialogue/execution and ordinary chat stays chat
 2026-08-03 | smartphone live-view affordances | listing iframe permissions or opening another tab does not make a 1280px remote browser comfortable on a phone | do activate in-app full screen, exact-URL reconnect, safe-area controls, and wake lock while preserving the provider session | don't create a second mobile browser route or change the shared remote viewport | verify 390px fullscreen fills the viewport, reconnect retains the exact session ID, reload restores it, and desktop keeps its existing toolbar
@@ -10,6 +11,17 @@ INDEX
 2026-08-02 | Coolify Docker health checks | the slim image omits both curl and wget, so a healthy Node process is rejected as unhealthy | do keep curl installed in the production image while Coolify health checks are enabled | don't infer an app crash from repeated `starting` checks | verify Coolify reports healthy and `/health` returns the expected JSON
 2026-08-02 | chatbot scope drift | presets can tempt a fixed-task dashboard instead of the requested conversational agent | do keep the unrestricted prompt and recent chat context as the primary control surface, with presets only as optional shortcuts | don't require users to choose from predefined Facebook actions | verify any free-form prompt reaches Anchor and its result returns to the chat
 2026-08-02 | injected cookies are not authenticated proof | a valid cookie array can still open Facebook's saved-profile chooser | do inject the user-pasted cookies before navigation and keep the live view interactive for login or 2FA | don't label the account connected from cookie count or homepage URL alone | verify the current page text or agent report shows an authenticated Facebook surface
+
+## 2026-08-03 | CURRENT
+
+- project/root: `/Users/samihalawa/git/PROJECTS_CODING/2026-AnchorBrowserFromAnywhere`
+- surface/workflow: confirmation classification between conversational action prompts and Anchor execution
+- mistaken approach: matching only exact base verbs, so an accented conjugated imperative could be classified read-only even when it visibly requests publication
+- superior approach: normalize diacritics, cover common English and Spanish mutation inflections and attached pronouns, and enforce the same classifier again on `/api/run`
+- evidence: production `/api/preview` classified a base-form publish instruction as write but its imperative-pronoun equivalent as read; the attempted run created a session and failed before Facebook because cookies were absent
+- trigger terms: `confirmation`, `publish`, `publícala`, `write detector`, `needsConfirmation`, `cookies must be a JSON array`
+- do: test the exact model-generated action prompt and siblings; don't: treat model mode, UI preview, or a failed browser start as server-side safety proof
+- required verification: exact generated prompt returns `409 needsConfirmation:true`, Anchor request count remains zero in tests, and rendered UI shows the confirmation before session execution
 
 ## 2026-08-03 | CURRENT
 

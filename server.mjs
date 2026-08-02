@@ -31,12 +31,12 @@ function loadFacebookAgentContext(raw = process.env.FACEBOOK_AGENT_CONTEXT) {
 
 const FACEBOOK_AGENT_CONTEXT = loadFacebookAgentContext();
 
-const MUTATION_WORDS = /\b(post|publish|comment|reply|send|message|like|react|join|follow|invite|delete|remove|edit|change|upload|publica|publicar|comenta|comentar|responde|responder|envia|enviar|mensaje|unirse|seguir|elimina|editar|sube)\b/i;
+const MUTATION_WORDS = /\b(?:post(?:ed|ing)?|publish(?:es|ed|ing)?|comment(?:ed|ing)?|repl(?:y|ies|ied|ying)|send(?:s|ing)?|sent|messag(?:e|ed|ing)|lik(?:e|ed|ing)|react(?:s|ed|ing)?|join(?:s|ed|ing)?|follow(?:s|ed|ing)?|invit(?:e|es|ed|ing)|delet(?:e|es|ed|ing)|remov(?:e|es|ed|ing)|edit(?:s|ed|ing)?|chang(?:e|es|ed|ing)|upload(?:s|ed|ing)?|publica(?!cion)[a-z]*|comenta(?!rio)[a-z]*|respond[a-z]*|envia[a-z]*|manda(?!rin)[a-z]*|unete|unir(?:se)?|sigue[a-z]*|seguir|elimina(?!cion)[a-z]*|edita[a-z]*|sube[a-z]*|da(?:le)?\s+me\s+gusta)\b/i;
 
 export function classifyIntent(prompt) {
   const text = String(prompt || '').trim();
   if (!text) return { kind: 'empty', needsConfirmation: false };
-  const actionableText = text
+  const actionableText = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\b(?:do not|don't|dont|never|without)\b[^.!?]*/gi, '')
     .replace(/\b(?:no|sin)\b[^.!?]*/gi, '');
   const needsConfirmation = MUTATION_WORDS.test(actionableText);
@@ -537,7 +537,7 @@ export function createApp({ agentResponder = converseWithGemini, agentContext = 
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     try {
       if (url.pathname === '/health') {
-        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), agentConfigured: Boolean(GEMINI_API_KEY), agentContextVersion: agentContext.version || 'environment', sessionUser: SESSION_USER, version: '1.8.0' });
+        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), agentConfigured: Boolean(GEMINI_API_KEY), agentContextVersion: agentContext.version || 'environment', sessionUser: SESSION_USER, version: '1.8.1' });
       }
       if (url.pathname.startsWith('/api/') && !authorized(req)) return json(res, 401, { ok: false, error: 'Access key required.' });
 

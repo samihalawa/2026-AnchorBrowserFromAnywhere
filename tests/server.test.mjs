@@ -29,12 +29,38 @@ test('classifies read-only Facebook requests without confirmation', () => {
   });
   assert.equal(classifyIntent('Tell me what is visible. Do not click or change anything.').needsConfirmation, false);
   assert.equal(classifyIntent('Resume las notificaciones sin enviar mensajes.').needsConfirmation, false);
+  assert.equal(classifyIntent('Revisa publicaciones, comentarios y mensajes recientes.').needsConfirmation, false);
 });
 
 test('requires confirmation for visible Facebook writes in English and Spanish', () => {
   assert.equal(classifyIntent('Comment on these three posts').needsConfirmation, true);
   assert.equal(classifyIntent('Publicar esto en cuatro grupos').needsConfirmation, true);
   assert.equal(classifyIntent('Send her a message').needsConfirmation, true);
+  assert.equal(classifyIntent('Revisa la cuenta y publícala.').needsConfirmation, true);
+  assert.equal(classifyIntent('Coméntalo y envíale una respuesta.').needsConfirmation, true);
+  assert.equal(classifyIntent('Súbela y luego elimínala.').needsConfirmation, true);
+  assert.equal(classifyIntent('Do not publish or change anything.').needsConfirmation, false);
+});
+
+test('the run endpoint rejects an unconfirmed conjugated write before touching Anchor', async () => {
+  let anchorCalls = 0;
+  const server = createApp({
+    anchorRequest: async () => {
+      anchorCalls += 1;
+      throw new Error('Anchor must not be called before confirmation.');
+    },
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/run`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-access-key': process.env.APP_ACCESS_KEY || '' },
+    body: JSON.stringify({ clientId: 'proof', prompt: 'Revisa la cuenta y publícala.' }),
+  });
+  const payload = await response.json();
+  assert.equal(response.status, 409);
+  assert.equal(payload.needsConfirmation, true);
+  assert.equal(anchorCalls, 0);
+  await new Promise((resolve) => server.close(resolve));
 });
 
 test('conversational messages return an agent reply without creating a browser task', async () => {
@@ -368,7 +394,7 @@ test('health exposes deployment identity without secrets', async () => {
   assert.equal(response.status, 200);
   assert.equal(payload.ok, true);
   assert.equal(payload.service, 'anchor-browser-from-anywhere');
-  assert.equal(payload.version, '1.8.0');
+  assert.equal(payload.version, '1.8.1');
   assert.equal(payload.agentContextVersion, 'test-runtime-config');
   assert.equal(payload.sessionUser, SESSION_USER);
   assert.equal('cookies' in payload, false);
