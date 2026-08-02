@@ -17,7 +17,7 @@ Production: https://anchorbrowser.megawebs.com
 
 ```bash
 npm install
-cp .env.example .env
+# Create .env with the required values below; npm start reads it automatically.
 npm start
 ```
 
@@ -26,7 +26,9 @@ Required production variables:
 - `ANCHOR_API_KEY`
 - `APP_ACCESS_KEY`
 
-Facebook cookies are entered inside the app, not configured in Coolify.
+The repo-root `.env` is the canonical deployment configuration. Keep Coolify's
+runtime variables synchronized from it. Facebook cookies are entered inside the
+app and remain in that device's local storage; they do not belong in `.env`.
 
 The app access password is stored in the 1Password item `Anchor Browser From Anywhere`.
 
