@@ -1,9 +1,21 @@
 INDEX
+2026-08-02 | persistent agent autonomy and mobile intervention | preserving only the remote browser ID still loses chat, running workflows, queued actions, and usable phone input | do persist all agent continuity, reattach the server to the exact remote session before any new creation, and provide mobile chat/browser tabs plus a full-screen live handoff | don't create a replacement session after a deploy or trap human intervention in a tiny iframe | verify chat/workflow survive reload, sequential actions keep one session ID, every new session receives saved cookies, and 390px live input is reachable
 2026-08-02 | conversational agent routing | sending every chat turn directly to Anchor makes greetings create browser tasks | do route every turn through conversational AI and invoke Anchor only for an explicit Facebook action | don't treat every non-write message as a read-only browser command | verify hello returns a chat reply with no workflow, a follow-up preserves context, and an explicit write reaches confirmation
 2026-08-02 | Anchor session continuity | in-memory session state and shutdown cleanup discard a still-running remote browser, while author CSS can keep a hidden empty-state overlay visible | do persist the exact live-view metadata on-device, validate the Anchor session on restore, and enforce `[hidden]` | don't terminate remote sessions during app redeploy or trust the DOM property without rendered proof | verify reload keeps the same ID, New session changes it, End session completes it, and the iframe is visibly unobscured
 2026-08-02 | Coolify Docker health checks | the slim image omits both curl and wget, so a healthy Node process is rejected as unhealthy | do keep curl installed in the production image while Coolify health checks are enabled | don't infer an app crash from repeated `starting` checks | verify Coolify reports healthy and `/health` returns the expected JSON
 2026-08-02 | chatbot scope drift | presets can tempt a fixed-task dashboard instead of the requested conversational agent | do keep the unrestricted prompt and recent chat context as the primary control surface, with presets only as optional shortcuts | don't require users to choose from predefined Facebook actions | verify any free-form prompt reaches Anchor and its result returns to the chat
 2026-08-02 | injected cookies are not authenticated proof | a valid cookie array can still open Facebook's saved-profile chooser | do inject the user-pasted cookies before navigation and keep the live view interactive for login or 2FA | don't label the account connected from cookie count or homepage URL alone | verify the current page text or agent report shows an authenticated Facebook surface
+
+## 2026-08-02 | CURRENT
+
+- project/root: `/Users/samihalawa/git/PROJECTS_CODING/2026-AnchorBrowserFromAnywhere`
+- surface/workflow: persistent conversational agent, Anchor tool execution, mobile human intervention
+- mistaken approach: persisting only `sessionId`/`liveViewUrl` while leaving chat, active workflow, queue, and server reattachment ephemeral; showing the 1280px live view only inside a small phone iframe
+- superior approach: persist chat/workflow/queue locally, always reattach the backend to the stored running Anchor session before creating another, serialize actions in that session, and expose mobile Agent/Live Browser views with a full-screen handoff and slash commands
+- evidence: user correction in the creation thread plus current `public/app.js`, `server.mjs`, and 390px local renders in `/Users/samihalawa/.codex/visualizations/anchor-mobile-agent-running-chat.png` and `/Users/samihalawa/.codex/visualizations/anchor-mobile-local-browser-live.png`
+- trigger terms: `same session`, `agent freedom`, `autonomous`, `phone`, `embedded browser`, `allow input`, `keyword`, `continue after refresh`
+- do: keep the user talking while one browser agent owns a continuing session; don't: start concurrent/replacement sessions or require step-by-step navigation instructions
+- required verification: rendered 390px chat and live views, cookie-backed session creation, exact session ID across action/reload, persistent chat/workflow state, and human-input/full-screen controls
 
 ## 2026-08-02 | CURRENT
 

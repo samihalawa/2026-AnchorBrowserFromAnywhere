@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyIntent, createApp, recoverableLiveViewUrl } from '../server.mjs';
+import { readFile } from 'node:fs/promises';
+import { classifyIntent, createApp, isAgentConversation, recoverableLiveViewUrl } from '../server.mjs';
 
 test('classifies read-only Facebook requests without confirmation', () => {
   assert.deepEqual(classifyIntent('Find recent posts asking for Chinese lessons'), {
@@ -40,6 +41,33 @@ test('conversational messages return an agent reply without creating a browser t
   await new Promise((resolve) => server.close(resolve));
 });
 
+test('agent-status questions remain conversational even if the model misroutes them', async () => {
+  assert.equal(isAgentConversation('What are you doing right now?'), true);
+  const server = createApp({
+    agentResponder: async () => ({
+      mode: 'action',
+      reply: 'I am checking the current Facebook page.',
+      actionPrompt: 'Inspect Facebook again.',
+    }),
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  const response = await fetch(`http://127.0.0.1:${address.port}/api/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-access-key': process.env.APP_ACCESS_KEY || '' },
+    body: JSON.stringify({
+      message: 'What are you doing right now?',
+      history: [],
+      activeWorkflow: { prompt: 'Inspect the current Facebook page.' },
+    }),
+  });
+  const payload = await response.json();
+  assert.equal(payload.mode, 'chat');
+  assert.equal(payload.actionPrompt, '');
+  assert.match(payload.reply, /currently working.*Inspect the current Facebook page/i);
+  await new Promise((resolve) => server.close(resolve));
+});
+
 test('agent can route an explicit Facebook request to the existing action pipeline', async () => {
   const server = createApp({
     agentResponder: async () => ({
@@ -68,6 +96,26 @@ test('only restores the matching Anchor live-view session URL', () => {
   assert.equal(recoverableLiveViewUrl('https://live.anchorbrowser.io/?sessionId=another-session', sessionId), false);
 });
 
+test('client persists agent continuity and passes the current session back to actions', async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(source, /anchor-chat-history/);
+  assert.match(source, /anchor-active-workflow/);
+  assert.match(source, /anchor-action-queue/);
+  assert.match(source, /session: state\.session/);
+  assert.match(source, /resumeWorkflow/);
+});
+
+test('mobile UI exposes chat, live browser, full-screen input, and slash commands', async () => {
+  const [html, css] = await Promise.all([
+    readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../public/styles.css', import.meta.url), 'utf8'),
+  ]);
+  assert.match(html, /data-mobile-view="browser"/);
+  assert.match(html, /id="open-live"/);
+  assert.match(html, /data-command="\/browser"/);
+  assert.match(css, /body\[data-mobile-view="browser"\] \.chat-card/);
+});
+
 test('health exposes deployment identity without secrets', async () => {
   const server = createApp();
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -77,6 +125,7 @@ test('health exposes deployment identity without secrets', async () => {
   assert.equal(response.status, 200);
   assert.equal(payload.ok, true);
   assert.equal(payload.service, 'anchor-browser-from-anywhere');
+  assert.equal(payload.version, '1.2.0');
   assert.equal('cookies' in payload, false);
   await new Promise((resolve) => server.close(resolve));
 });

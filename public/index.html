@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
+<body data-mobile-view="chat">
   <main class="shell">
     <header class="topbar">
       <a class="brand" href="/" aria-label="Anchor Browser home">
@@ -23,14 +23,22 @@
       </div>
     </header>
 
+    <nav class="mobile-view-switch" aria-label="Mobile workspace view">
+      <button type="button" data-mobile-view="chat" aria-pressed="true">Agent chat</button>
+      <button type="button" data-mobile-view="browser" aria-pressed="false">Live browser</button>
+    </nav>
+
     <section class="workspace">
-      <article class="browser-card">
+      <article class="browser-card" id="browser-card">
         <div class="browser-toolbar">
           <div>
             <p class="eyebrow">LIVE SESSION</p>
             <h1>Facebook, inside your browser.</h1>
           </div>
-          <button class="ghost" id="toggle-browser" type="button" aria-expanded="true">Hide view</button>
+          <div class="browser-toolbar-actions">
+            <a class="ghost open-live" id="open-live" href="#" target="_blank" rel="noopener" hidden>Open full screen</a>
+            <button class="ghost" id="toggle-browser" type="button" aria-expanded="true">Hide view</button>
+          </div>
         </div>
         <div class="browser-stage" id="browser-stage">
           <div class="browser-empty" id="browser-empty">
@@ -39,7 +47,7 @@
             <p>Create one Anchor session, then control it from the chat.</p>
             <button class="primary" id="start-session" type="button">Create Facebook session</button>
           </div>
-          <iframe id="live-browser" title="Live Anchor Browser session" sandbox="allow-same-origin allow-scripts allow-forms allow-popups" allow="clipboard-read; clipboard-write" hidden></iframe>
+          <iframe id="live-browser" title="Live Anchor Browser session" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-pointer-lock allow-top-navigation-by-user-activation" allow="clipboard-read; clipboard-write; fullscreen" hidden></iframe>
         </div>
         <div class="session-strip">
           <span id="session-state">Session off</span>
@@ -50,7 +58,7 @@
         </div>
       </article>
 
-      <aside class="chat-card">
+      <aside class="chat-card" id="chat-card">
         <div class="chat-heading">
           <p class="eyebrow">AGENT CHAT</p>
           <h2>Talk. Decide. Act.</h2>
@@ -72,6 +80,7 @@
           <button type="submit" aria-label="Send request">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </button>
+          <p class="command-hint">Commands: <button type="button" data-command="/browser">/browser</button> <button type="button" data-command="/cookies">/cookies</button> <button type="button" data-command="/new">/new</button></p>
         </form>
       </aside>
     </section>

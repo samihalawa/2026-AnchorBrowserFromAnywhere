@@ -36,6 +36,11 @@ export function classifyIntent(prompt) {
   };
 }
 
+export function isAgentConversation(prompt) {
+  const text = String(prompt || '').trim().toLowerCase();
+  return /\b(what are you doing|what do you do|what did you do|are you (still )?(working|doing)|how are you (working|doing)|current task|task status|your status|agent status)\b/.test(text);
+}
+
 function json(res, status, payload) {
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
@@ -195,9 +200,11 @@ async function createFacebookSession(clientId, cookies) {
   return record;
 }
 
-async function getOrCreateSession(clientId, cookies) {
+async function getOrCreateSession(clientId, cookies, storedSession) {
   const current = sessions.get(clientId);
   if (current) return current;
+  const restored = await restoreFacebookSession(clientId, storedSession || {});
+  if (restored) return restored;
   return createFacebookSession(clientId, cookies);
 }
 
@@ -216,6 +223,7 @@ function sessionPayload(record) {
     clientId: record.clientId,
     sessionId: record.sessionId,
     liveViewUrl: record.liveViewUrl,
+    createdAt: Number(record.createdAt || Date.now()),
     authenticated: Boolean(record.authenticated),
     url: record.url || 'https://www.facebook.com/',
     cookiesApplied: Number(record.cookiesApplied || 0),
@@ -270,12 +278,16 @@ function cleanHistory(value) {
 function agentInstruction() {
   return [
     'You are Anchor, a warm conversational AI agent with optional Facebook browser tools.',
+    'You have one persistent Anchor browser agent that can freely navigate, search, scroll, read, click, and fill pages to complete concrete Facebook requests.',
     'Reply naturally to greetings, questions, brainstorming, explanations, and drafting requests without using a browser.',
+    'Questions about you, your capabilities, your status, what you are doing, or the current task are always conversation. Never start or queue a browser action for those questions.',
     'Choose mode "action" only when the user clearly asks you to inspect, navigate, search, read, or change Facebook now.',
     'A request to draft or improve text is conversation, not an action, unless the user explicitly asks you to publish or send it.',
     'Use recent conversation to resolve short follow-ups such as "do it".',
     'For mode "chat", set actionPrompt to an empty string.',
     'For mode "action", reply briefly about what you are about to do and provide a self-contained plain-language actionPrompt for the browser.',
+    'Describe the complete outcome, not individual browser steps; the browser agent decides the navigation and tools needed autonomously.',
+    'If a missing detail truly prevents action, ask for it naturally in chat. Login, two-factor, CAPTCHA, or manual review can be completed by the user in the same live browser session.',
     'The actionPrompt must include the complete requested outcome, including any publish, comment, send, or other visible change; never replace it with only a search step.',
     'Never put JSON, function calls, tool syntax, or code in actionPrompt.',
     'Never claim that a Facebook action completed; the browser tool will report the observed result.',
@@ -340,12 +352,13 @@ function executionPrompt(prompt, isWrite, history = []) {
     .join('\n');
   return [
     'Work only inside the current Facebook browser session.',
+    'Act autonomously: navigate, search, scroll, inspect, and use the browser tools needed to complete the full request without asking for step-by-step permission.',
     conversation ? `Recent conversation for context:\n${conversation}` : '',
     `User request: ${prompt}`,
     isWrite
       ? 'The user reviewed and explicitly confirmed this exact external action. Execute only that action.'
       : 'This is read-only. Do not post, comment, message, join, react, edit, or delete anything.',
-    'Use the existing logged-in account. If login or two-factor authentication is required, stop and report it.',
+    'Use the existing logged-in account. Ask for human input only when login, two-factor authentication, CAPTCHA, or an indispensable missing value blocks progress; keep the current page open for that input.',
     'At the end, report the exact Facebook page, what visibly happened, and any pending admin approval.',
   ].filter(Boolean).join('\n');
 }
@@ -358,8 +371,9 @@ async function runTask(session, prompt, history) {
     body: JSON.stringify({
       prompt: executionPrompt(prompt, intent.needsConfirmation, history),
       agent: 'browser-use',
-      max_steps: 60,
+      max_steps: 120,
       detect_elements: true,
+      highlight_elements: true,
       human_intervention: true,
       async: true,
     }),
@@ -392,7 +406,7 @@ export function createApp({ agentResponder = converseWithGemini } = {}) {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     try {
       if (url.pathname === '/health') {
-        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), agentConfigured: Boolean(GEMINI_API_KEY), version: '1.1.0' });
+        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), agentConfigured: Boolean(GEMINI_API_KEY), version: '1.2.0' });
       }
       if (url.pathname.startsWith('/api/') && !authorized(req)) return json(res, 401, { ok: false, error: 'Access key required.' });
 
@@ -411,14 +425,20 @@ export function createApp({ agentResponder = converseWithGemini } = {}) {
       if (req.method === 'POST' && url.pathname === '/api/session') {
         const input = await bodyJson(req);
         const clientId = String(input.clientId || crypto.randomUUID()).slice(0, 100);
-        if (input.replace === true && sessions.has(clientId)) await closeSession(sessions.get(clientId));
-        const session = await getOrCreateSession(clientId, input.cookies);
+        if (input.replace === true) {
+          const existing = sessions.get(clientId) || await restoreFacebookSession(clientId, input.session || {});
+          if (existing) await closeSession(existing);
+        }
+        const session = input.replace === true
+          ? await createFacebookSession(clientId, input.cookies)
+          : await getOrCreateSession(clientId, input.cookies, input.session);
         return json(res, 200, { ok: true, session: sessionPayload(session) });
       }
 
       if (req.method === 'DELETE' && url.pathname === '/api/session') {
         const input = await bodyJson(req);
-        const record = sessions.get(String(input.clientId || ''));
+        const clientId = String(input.clientId || '');
+        const record = sessions.get(clientId) || await restoreFacebookSession(clientId, input.session || {});
         if (record) await closeSession(record);
         return json(res, 200, { ok: true });
       }
@@ -436,6 +456,12 @@ export function createApp({ agentResponder = converseWithGemini } = {}) {
         const message = String(input.message || '').trim();
         if (!message) return json(res, 400, { ok: false, error: 'Write a message first.' });
         const decision = await agentResponder(message.slice(0, 4000), input.history);
+        if (isAgentConversation(message)) {
+          decision.mode = 'chat';
+          decision.actionPrompt = '';
+          const activePrompt = String(input.activeWorkflow?.prompt || '').trim();
+          if (activePrompt) decision.reply = `I’m currently working on this in the same browser session: ${activePrompt}`;
+        }
         return json(res, 200, { ok: true, ...decision });
       }
 
@@ -446,7 +472,7 @@ export function createApp({ agentResponder = converseWithGemini } = {}) {
         const intent = classifyIntent(prompt);
         if (!prompt || !clientId) return json(res, 400, { ok: false, error: 'Missing request or browser session.' });
         if (intent.needsConfirmation && input.confirmed !== true) return json(res, 409, { ok: false, needsConfirmation: true, prompt, ...intent });
-        const session = await getOrCreateSession(clientId, input.cookies);
+        const session = await getOrCreateSession(clientId, input.cookies, input.session);
         const task = await runTask(session, prompt, input.history);
         return json(res, 200, { ok: true, task, session: { sessionId: session.sessionId, liveViewUrl: session.liveViewUrl, authenticated: session.authenticated } });
       }
