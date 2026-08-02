@@ -309,6 +309,7 @@ test('mobile UI exposes chat, live browser, full-screen input, and slash command
   assert.match(css, /\.history-menu/);
   assert.match(css, /\.workspace-resizer/);
   assert.match(css, /\.stage-loading/);
+  assert.match(css, /\.command-hint button \{ min-width: 2\.75rem; min-height: 2\.75rem;/);
 });
 
 test('health exposes deployment identity without secrets', async () => {
