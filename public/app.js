@@ -44,6 +44,8 @@ const messages = $('#messages');
 const promptInput = $('#prompt');
 const CLIENT_IDLE_CLOSE_MS = 30 * 60 * 1000;
 let idleCloseTimer = null;
+let wakeLock = null;
+let wakeLockRequest = null;
 
 function persistHistory() {
   state.history = state.history.slice(-30);
@@ -145,6 +147,7 @@ function setMobileView(view) {
   document.querySelectorAll('[data-mobile-view]').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.mobileView === next));
   });
+  void syncWakeLock();
 }
 
 function setBrowserCollapsed(collapsed) {
@@ -153,6 +156,83 @@ function setBrowserCollapsed(collapsed) {
   browserStage.classList.toggle('collapsed', state.browserCollapsed);
   $('#toggle-browser').textContent = state.browserCollapsed ? 'Show view' : 'Hide view';
   $('#toggle-browser').setAttribute('aria-expanded', String(!state.browserCollapsed));
+  void syncWakeLock();
+}
+
+function fullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function updateFullscreenControls() {
+  const active = fullscreenElement() === browserStage;
+  $('#stage-fullscreen').textContent = active ? 'Exit full screen' : 'Full screen';
+  if (!state.replay) $('#open-live').innerHTML = active
+    ? 'Exit full screen'
+    : 'Full screen <span aria-hidden="true">↗</span>';
+}
+
+async function toggleStageFullscreen() {
+  if (fullscreenElement()) {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (exit) await exit.call(document);
+    return;
+  }
+  const request = browserStage.requestFullscreen
+    ? () => browserStage.requestFullscreen({ navigationUI: 'hide' })
+    : (browserStage.webkitRequestFullscreen ? () => browserStage.webkitRequestFullscreen() : null);
+  if (request) {
+    try {
+      await request();
+      return;
+    } catch {
+      // A new-tab live view remains available when a browser rejects fullscreen.
+    }
+  }
+  const url = state.replay ? sessionReplay.currentSrc : state.session?.liveViewUrl;
+  if (url) window.open(url, '_blank', 'noopener');
+}
+
+function reconnectLiveView() {
+  const url = state.session?.liveViewUrl;
+  if (!url || state.replay) return;
+  setStageLoading(true, 'Reconnecting the live view…');
+  liveBrowser.src = 'about:blank';
+  requestAnimationFrame(() => {
+    liveBrowser.src = url;
+  });
+}
+
+function shouldKeepScreenAwake() {
+  return Boolean(
+    state.session
+    && state.mobileView === 'browser'
+    && !state.browserCollapsed
+    && document.visibilityState === 'visible'
+    && window.matchMedia('(max-width: 47.99rem)').matches
+  );
+}
+
+async function syncWakeLock() {
+  if (!shouldKeepScreenAwake()) {
+    if (wakeLock) await wakeLock.release().catch(() => {});
+    wakeLock = null;
+    return;
+  }
+  if (!navigator.wakeLock?.request || wakeLock || wakeLockRequest) return;
+  wakeLockRequest = navigator.wakeLock.request('screen');
+  try {
+    const requestedLock = await wakeLockRequest;
+    if (!shouldKeepScreenAwake()) {
+      await requestedLock.release().catch(() => {});
+      return;
+    }
+    wakeLock = requestedLock;
+    wakeLock.addEventListener('release', () => { wakeLock = null; }, { once: true });
+  } catch {
+    wakeLock = null;
+  } finally {
+    wakeLockRequest = null;
+  }
 }
 
 function restorePendingConfirmation() {
@@ -205,12 +285,15 @@ function clearSessionView() {
   $('#open-live').href = '#';
   $('#open-live').innerHTML = 'Full screen <span aria-hidden="true">↗</span>';
   $('#open-live').hidden = true;
+  $('#stage-controls').hidden = true;
+  $('#refresh-live-view').hidden = false;
   liveBrowser.hidden = true;
   browserEmpty.hidden = false;
   $('#close-session').hidden = true;
   $('#session-state').textContent = 'Session off';
   setStageLoading(false);
   setStatus('Ready');
+  void syncWakeLock();
 }
 
 function showSession(session, restored = false) {
@@ -225,11 +308,15 @@ function showSession(session, restored = false) {
   $('#open-live').href = session.liveViewUrl;
   $('#open-live').innerHTML = 'Full screen <span aria-hidden="true">↗</span>';
   $('#open-live').hidden = false;
+  $('#stage-controls').hidden = false;
+  $('#refresh-live-view').hidden = false;
   liveBrowser.hidden = false;
   browserEmpty.hidden = true;
   $('#close-session').hidden = false;
   $('#session-state').textContent = restored ? 'Existing session restored' : (session.authenticated ? 'Facebook connected' : 'Login available in live view');
   setStatus(session.authenticated ? 'Facebook live' : 'Browser live', 'live');
+  updateFullscreenControls();
+  void syncWakeLock();
   armIdleClose();
 }
 
@@ -342,6 +429,8 @@ async function showReplay(session) {
   $('#open-live').href = payload.recording.url;
   $('#open-live').innerHTML = 'Open recording <span aria-hidden="true">↗</span>';
   $('#open-live').hidden = false;
+  $('#stage-controls').hidden = false;
+  $('#refresh-live-view').hidden = true;
   $('#return-live').hidden = false;
   $('#session-state').textContent = `Replay · ${formatSessionDate(session.createdAt)}`;
   setStatus('Replay');
@@ -692,6 +781,18 @@ $('#open-cookies').addEventListener('click', () => {
 $('#toggle-browser').addEventListener('click', (event) => {
   setBrowserCollapsed(!state.browserCollapsed);
 });
+$('#open-live').addEventListener('click', (event) => {
+  if (browserStage.requestFullscreen || browserStage.webkitRequestFullscreen || fullscreenElement()) {
+    event.preventDefault();
+    void toggleStageFullscreen();
+  }
+});
+$('#stage-fullscreen').addEventListener('click', () => void toggleStageFullscreen());
+$('#refresh-live-view').addEventListener('click', reconnectLiveView);
+document.addEventListener('fullscreenchange', updateFullscreenControls);
+document.addEventListener('webkitfullscreenchange', updateFullscreenControls);
+document.addEventListener('visibilitychange', () => void syncWakeLock());
+window.addEventListener('resize', () => void syncWakeLock());
 
 liveBrowser.addEventListener('load', () => {
   if (liveBrowser.src && liveBrowser.src !== 'about:blank') setStageLoading(false);

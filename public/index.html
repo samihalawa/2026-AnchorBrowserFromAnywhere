@@ -68,8 +68,12 @@
             <p>Create one Anchor session, then control it from the chat.</p>
             <button class="primary" id="start-session" type="button">Create Facebook session</button>
           </div>
-          <iframe id="live-browser" title="Live Anchor Browser session" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-pointer-lock allow-top-navigation-by-user-activation" allow="clipboard-read; clipboard-write; fullscreen" hidden></iframe>
+          <iframe id="live-browser" title="Live Anchor Browser session" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-pointer-lock allow-top-navigation-by-user-activation" allow="clipboard-read; clipboard-write; fullscreen" allowfullscreen loading="eager" hidden></iframe>
           <video id="session-replay" controls playsinline preload="metadata" hidden></video>
+          <div class="stage-controls" id="stage-controls" hidden>
+            <button id="refresh-live-view" type="button">Reconnect</button>
+            <button id="stage-fullscreen" type="button">Full screen</button>
+          </div>
           <div class="stage-loading" id="stage-loading" role="status" aria-live="polite" hidden>
             <span class="stage-spinner" aria-hidden="true"></span>
             <strong id="stage-loading-label">Opening your browser…</strong>

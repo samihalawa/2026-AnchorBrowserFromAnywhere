@@ -290,10 +290,11 @@ test('client persists agent continuity and passes the current session back to ac
   assert.match(source, /toggleTaskPause/);
 });
 
-test('mobile UI exposes chat, live browser, full-screen input, and slash commands', async () => {
-  const [html, css] = await Promise.all([
+test('mobile UI exposes chat, live browser, native full screen, reconnect, wake lock, and slash commands', async () => {
+  const [html, css, client] = await Promise.all([
     readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
     readFile(new URL('../public/styles.css', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
   ]);
   assert.match(html, /data-mobile-view="browser"/);
   assert.match(html, /id="open-live"/);
@@ -303,13 +304,22 @@ test('mobile UI exposes chat, live browser, full-screen input, and slash command
   assert.match(html, /id="workspace-resizer"/);
   assert.match(html, /id="stop-task"/);
   assert.match(html, /id="stage-loading"/);
+  assert.match(html, /id="stage-controls"/);
+  assert.match(html, /id="refresh-live-view"/);
+  assert.match(html, /id="stage-fullscreen"/);
+  assert.match(html, /allowfullscreen loading="eager"/);
   assert.match(html, /View all sessions/);
   assert.match(html, /data-command="\/browser"/);
   assert.match(css, /body\[data-mobile-view="browser"\] \.chat-card/);
   assert.match(css, /\.history-menu/);
   assert.match(css, /\.workspace-resizer/);
   assert.match(css, /\.stage-loading/);
+  assert.match(css, /\.browser-stage:fullscreen/);
+  assert.match(css, /\.stage-controls/);
   assert.match(css, /\.command-hint button \{ min-width: 2\.75rem; min-height: 2\.75rem;/);
+  assert.match(client, /requestFullscreen/);
+  assert.match(client, /navigator\.wakeLock/);
+  assert.match(client, /Reconnecting the live view/);
 });
 
 test('health exposes deployment identity without secrets', async () => {
@@ -321,7 +331,7 @@ test('health exposes deployment identity without secrets', async () => {
   assert.equal(response.status, 200);
   assert.equal(payload.ok, true);
   assert.equal(payload.service, 'anchor-browser-from-anywhere');
-  assert.equal(payload.version, '1.5.0');
+  assert.equal(payload.version, '1.6.0');
   assert.equal(payload.sessionUser, 'kittyfb');
   assert.equal('cookies' in payload, false);
   await new Promise((resolve) => server.close(resolve));

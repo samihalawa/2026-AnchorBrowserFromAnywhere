@@ -97,6 +97,11 @@ h2 { margin-bottom: .5rem; font-size: clamp(1.25rem, 4vw, 1.8rem); line-height: 
 .primary.danger { background: var(--coral); color: white; }
 #live-browser, #session-replay { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #111; touch-action: manipulation; }
 #session-replay { object-fit: contain; }
+.stage-controls { position: absolute; z-index: 7; right: .65rem; bottom: max(.65rem, env(safe-area-inset-bottom)); display: none; align-items: center; gap: .4rem; padding: .3rem; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; background: rgba(23,27,22,.82); box-shadow: 0 .5rem 1.5rem rgba(0,0,0,.24); backdrop-filter: blur(.8rem); }
+.stage-controls button { min-height: 2.75rem; padding: .55rem .8rem; border: 0; border-radius: 999px; background: rgba(255,255,255,.12); color: white; font-size: .75rem; font-weight: 800; }
+.stage-controls button:last-child { background: var(--acid); color: var(--ink); }
+.browser-stage:fullscreen, .browser-stage:-webkit-full-screen { width: 100vw; height: 100dvh; min-height: 100vh; margin: 0; border-radius: 0; background: #111; }
+.browser-stage:fullscreen .stage-controls, .browser-stage:-webkit-full-screen .stage-controls { display: flex; right: max(.65rem, env(safe-area-inset-right)); }
 .stage-loading { position: absolute; z-index: 5; inset: 0; display: grid; place-content: center; justify-items: center; gap: 1rem; color: white; background: linear-gradient(145deg, rgba(23,27,22,.96), rgba(38,46,34,.92)); }
 .stage-spinner { width: 2.75rem; height: 2.75rem; border: .2rem solid rgba(255,255,255,.2); border-top-color: var(--acid); border-radius: 50%; animation: spin .8s linear infinite; }
 .stage-loading strong { font-size: .9rem; }
@@ -171,7 +176,8 @@ blockquote { margin: 1rem 0; padding: 1rem; border-left: .25rem solid var(--cora
   .browser-toolbar h1 { font-size: 1.2rem; }
   .browser-toolbar-actions { align-items: center; }
   .browser-toolbar-actions .ghost { padding-inline: .55rem; }
-  .open-live { padding-inline: .75rem; }
+  .browser-toolbar .open-live { display: none; }
+  .stage-controls { display: flex; }
   .browser-stage.collapsed + .session-strip { margin-top: .5rem; }
   .messages { overscroll-behavior: contain; }
   .composer-meta { flex-wrap: wrap; }
