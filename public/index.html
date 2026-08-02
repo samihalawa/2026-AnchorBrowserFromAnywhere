@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#171b16">
+  <title>Anchor Browser From Anywhere</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Anchor Browser home">
+        <span class="brand-mark">A</span>
+        <span><strong>ANCHOR</strong><small>from anywhere</small></span>
+      </a>
+      <div class="header-actions">
+        <button class="settings-button" id="open-cookies" type="button" aria-label="Facebook cookie settings">Cookies</button>
+        <div class="connection" id="connection"><span></span><b>Ready</b></div>
+      </div>
+    </header>
+
+    <section class="workspace">
+      <article class="browser-card">
+        <div class="browser-toolbar">
+          <div>
+            <p class="eyebrow">LIVE SESSION</p>
+            <h1>Facebook, inside your browser.</h1>
+          </div>
+          <button class="ghost" id="toggle-browser" type="button" aria-expanded="true">Hide view</button>
+        </div>
+        <div class="browser-stage" id="browser-stage">
+          <div class="browser-empty" id="browser-empty">
+            <span class="orbit"><i></i></span>
+            <h2>No browser running</h2>
+            <p>Start one private Anchor session, then control it from the chat.</p>
+            <button class="primary" id="start-session" type="button">Start Facebook browser</button>
+          </div>
+          <iframe id="live-browser" title="Live Anchor Browser session" sandbox="allow-same-origin allow-scripts allow-forms allow-popups" allow="clipboard-read; clipboard-write" hidden></iframe>
+        </div>
+        <div class="session-strip">
+          <span id="session-state">Session off</span>
+          <button id="close-session" class="text-button" type="button" hidden>End session</button>
+        </div>
+      </article>
+
+      <aside class="chat-card">
+        <div class="chat-heading">
+          <p class="eyebrow">BROWSER CHAT</p>
+          <h2>Ask. Watch. Done.</h2>
+        </div>
+        <div class="quick-actions" aria-label="Suggested requests">
+          <button type="button" data-prompt="Find recent Facebook group posts asking for Chinese lessons and summarize the best opportunities.">Find lesson leads</button>
+          <button type="button" data-prompt="Show me my recent posts in the Facebook groups where I shared Chinese lessons.">Check my posts</button>
+          <button type="button" data-prompt="Open Facebook notifications and summarize anything related to my recent group posts.">Read notifications</button>
+        </div>
+        <div class="messages" id="messages" aria-live="polite">
+          <div class="message assistant">
+            <span>AB</span>
+            <p>Tell me what to do on Facebook. I’ll open a real remote browser and show every step here.</p>
+          </div>
+        </div>
+        <form class="composer" id="composer">
+          <label for="prompt">Your request</label>
+          <textarea id="prompt" rows="2" placeholder="e.g. Find 5 people asking for Chinese lessons…" required></textarea>
+          <button type="submit" aria-label="Send request">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </form>
+      </aside>
+    </section>
+  </main>
+
+  <dialog id="unlock-dialog" class="modal" aria-labelledby="unlock-title">
+    <form method="dialog" id="unlock-form">
+      <p class="eyebrow">PRIVATE ACCESS</p>
+      <h2 id="unlock-title">Open your browser agent</h2>
+      <p>Enter the access key for this private control panel.</p>
+      <input id="access-key" type="password" autocomplete="current-password" placeholder="Access key" required>
+      <button class="primary" value="unlock">Continue</button>
+      <small id="unlock-error"></small>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-dialog" class="modal confirm" aria-labelledby="confirm-title">
+    <form method="dialog">
+      <span class="impact">REAL FACEBOOK ACTION</span>
+      <h2 id="confirm-title">Confirm before it acts</h2>
+      <p>This will be visible to other people on Facebook:</p>
+      <blockquote id="confirm-prompt"></blockquote>
+      <div class="modal-actions">
+        <button class="ghost" value="cancel">Cancel</button>
+        <button class="primary danger" id="confirm-run" value="confirm">Confirm and run</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="cookies-dialog" class="modal cookies-modal" aria-labelledby="cookies-title">
+    <form method="dialog" id="cookies-form">
+      <p class="eyebrow">FACEBOOK ACCOUNT</p>
+      <h2 id="cookies-title">Paste your cookies</h2>
+      <p>Copy the JSON array from Cookie-Editor. It stays in this device’s browser and is injected into every new Anchor session.</p>
+      <textarea id="cookies-json" rows="9" spellcheck="false" placeholder='[{"name":"c_user","value":"…"}, {"name":"xs","value":"…"}]' required></textarea>
+      <div class="cookie-status" id="cookie-status">Required: c_user, xs, datr and sb</div>
+      <div class="modal-actions">
+        <button class="ghost" value="cancel">Cancel</button>
+        <button class="primary" id="save-cookies" value="save">Save cookies</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
