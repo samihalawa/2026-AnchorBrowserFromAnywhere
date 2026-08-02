@@ -17,6 +17,11 @@ const GEMINI_MODEL = String(process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite')
 const ANCHOR_API = 'https://api.anchorbrowser.io/v1';
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta';
 const sessions = new Map();
+export const SESSION_USER = 'kittyfb';
+const APP_SESSION_TAGS = ['anchorbrowser-from-anywhere', 'facebook'];
+const USER_SESSION_TAGS = [...APP_SESSION_TAGS, SESSION_USER];
+const SESSION_IDLE_MINUTES = 15;
+const SESSION_MAX_MINUTES = 1440;
 
 const MUTATION_WORDS = /\b(post|publish|comment|reply|send|message|like|react|join|follow|invite|delete|remove|edit|change|upload|publica|publicar|comenta|comentar|responde|responder|envia|enviar|mensaje|unirse|seguir|elimina|editar|sube)\b/i;
 
@@ -64,7 +69,7 @@ export function toolInventoryDecision(message, history = []) {
   const inventory = {
     agent: 'Anchor',
     conversation: true,
-    browserSession: 'persistent',
+    browserSession: 'one primary provider-backed session with discreet history and optional parallel sessions',
     tools: AGENT_TOOLS,
   };
   const wantsJson = /\bjson\b/i.test(String(message || ''));
@@ -213,15 +218,62 @@ async function prepareFacebook(cdpUrl, rawCookies) {
   }
 }
 
-async function createFacebookSession(clientId, cookies) {
-  const data = await anchorFetch('/sessions', {
+export function providerLiveViewUrl(sessionId) {
+  const id = String(sessionId || '').trim();
+  return id ? `https://live.anchorbrowser.io/inspector.html?sessionId=${encodeURIComponent(id)}` : '';
+}
+
+function providerSessionId(value) {
+  return String(value?.session_id || value?.id || '').trim();
+}
+
+function providerSessionTags(value) {
+  const tags = value?.tags || value?.configuration?.session?.tags || [];
+  return Array.isArray(tags) ? tags.map(String) : [];
+}
+
+export function sessionBelongsToKitty(value) {
+  const tags = providerSessionTags(value);
+  return APP_SESSION_TAGS.every((tag) => tags.includes(tag));
+}
+
+export function sessionHistoryItem(value) {
+  const sessionId = providerSessionId(value);
+  const status = String(value?.status || '').toLowerCase();
+  return {
+    sessionId,
+    user: SESSION_USER,
+    status,
+    createdAt: Date.parse(value?.created_at || '') || 0,
+    duration: Number(value?.duration || 0),
+    recordingAvailable: Boolean(value?.recording),
+    liveViewUrl: status === 'running' ? providerLiveViewUrl(sessionId) : '',
+    taggedUser: providerSessionTags(value).includes(SESSION_USER),
+  };
+}
+
+async function listKittySessions(anchorRequest = anchorFetch) {
+  const query = new URLSearchParams({
+    limit: '50',
+    sort_by: 'created_at',
+    sort_order: 'desc',
+    tags: APP_SESSION_TAGS.join(','),
+  });
+  const payload = await anchorRequest(`/sessions?${query}`);
+  const source = Array.isArray(payload?.sessions) ? payload.sessions : [];
+  return source.filter(sessionBelongsToKitty).map(sessionHistoryItem);
+}
+
+async function createFacebookSession(clientId, cookies, anchorRequest = anchorFetch, prepare = prepareFacebook) {
+  const data = await anchorRequest('/sessions', {
     method: 'POST',
     body: JSON.stringify({
       session: {
         initial_url: 'about:blank',
-        timeout: { idle_timeout: 900, max_duration: 2400 },
+        timeout: { idle_timeout: SESSION_IDLE_MINUTES, max_duration: SESSION_MAX_MINUTES },
         live_view: { read_only: false },
-        tags: ['anchorbrowser-from-anywhere', 'facebook'],
+        recording: { active: true },
+        tags: USER_SESSION_TAGS,
       },
       browser: {
         headless: { active: false },
@@ -230,32 +282,35 @@ async function createFacebookSession(clientId, cookies) {
       },
     }),
   });
-  const prepared = await prepareFacebook(data.cdp_url, cookies);
+  const prepared = await prepare(data.cdp_url, cookies);
   const record = {
     clientId,
+    user: SESSION_USER,
     sessionId: data.id,
     liveViewUrl: data.live_view_url,
     createdAt: Date.now(),
+    status: 'running',
     ...prepared,
   };
-  sessions.set(clientId, record);
+  sessions.set(record.sessionId, record);
   return record;
 }
 
-async function getOrCreateSession(clientId, cookies, storedSession) {
-  const current = sessions.get(clientId);
-  if (current) return current;
-  const restored = await restoreFacebookSession(clientId, storedSession || {});
+async function getOrCreateSession(clientId, cookies, storedSession, anchorRequest = anchorFetch, prepare = prepareFacebook) {
+  const restored = await restoreFacebookSession(clientId, storedSession || {}, anchorRequest);
   if (restored) return restored;
-  return createFacebookSession(clientId, cookies);
+  const history = await listKittySessions(anchorRequest);
+  const latest = history.find((item) => item.status === 'running');
+  if (latest) return restoreFacebookSession(clientId, latest, anchorRequest);
+  return createFacebookSession(clientId, cookies, anchorRequest, prepare);
 }
 
-async function closeSession(record) {
+async function closeSession(record, anchorRequest = anchorFetch) {
   if (!record?.sessionId) return;
   try {
-    await anchorFetch(`/sessions/${encodeURIComponent(record.sessionId)}`, { method: 'DELETE' });
+    await anchorRequest(`/sessions/${encodeURIComponent(record.sessionId)}`, { method: 'DELETE' });
   } finally {
-    sessions.delete(record.clientId);
+    sessions.delete(record.sessionId);
   }
 }
 
@@ -263,9 +318,11 @@ function sessionPayload(record) {
   if (!record) return null;
   return {
     clientId: record.clientId,
+    user: SESSION_USER,
     sessionId: record.sessionId,
     liveViewUrl: record.liveViewUrl,
     createdAt: Number(record.createdAt || Date.now()),
+    status: record.status || 'running',
     authenticated: Boolean(record.authenticated),
     url: record.url || 'https://www.facebook.com/',
     cookiesApplied: Number(record.cookiesApplied || 0),
@@ -283,25 +340,29 @@ export function recoverableLiveViewUrl(value, sessionId) {
   }
 }
 
-async function restoreFacebookSession(clientId, input) {
-  const current = sessions.get(clientId);
-  if (current) return current;
+async function restoreFacebookSession(clientId, input, anchorRequest = anchorFetch) {
   const sessionId = String(input.sessionId || '').trim();
-  const liveViewUrl = String(input.liveViewUrl || '').trim();
-  if (!sessionId || !recoverableLiveViewUrl(liveViewUrl, sessionId)) return null;
+  if (!sessionId) return null;
+  const suppliedLiveViewUrl = String(input.liveViewUrl || '').trim();
+  const liveViewUrl = recoverableLiveViewUrl(suppliedLiveViewUrl, sessionId)
+    ? suppliedLiveViewUrl
+    : providerLiveViewUrl(sessionId);
   try {
-    const remote = await anchorFetch(`/sessions/${encodeURIComponent(sessionId)}`);
-    if (String(remote.status || '').toLowerCase() !== 'running') return null;
+    const remote = await anchorRequest(`/sessions/${encodeURIComponent(sessionId)}`);
+    if (!sessionBelongsToKitty(remote) || String(remote.status || '').toLowerCase() !== 'running') return null;
+    const current = sessions.get(sessionId);
     const record = {
       clientId,
+      user: SESSION_USER,
       sessionId,
-      liveViewUrl,
+      liveViewUrl: current?.liveViewUrl || liveViewUrl,
       createdAt: Date.parse(remote.created_at || '') || Date.now(),
-      authenticated: Boolean(input.authenticated),
-      url: String(input.url || 'https://www.facebook.com/'),
-      cookiesApplied: Number(input.cookiesApplied || 0),
+      status: 'running',
+      authenticated: Boolean(current?.authenticated || input.authenticated),
+      url: String(current?.url || input.url || 'https://www.facebook.com/'),
+      cookiesApplied: Number(current?.cookiesApplied || input.cookiesApplied || 0),
     };
-    sessions.set(clientId, record);
+    sessions.set(sessionId, record);
     return record;
   } catch (error) {
     if (/Anchor Browser 404/.test(error.message)) return null;
@@ -320,7 +381,8 @@ function cleanHistory(value) {
 function agentInstruction() {
   return [
     'You are Anchor, a warm conversational AI agent with optional Facebook browser tools.',
-    'You have one persistent Anchor browser agent that can freely navigate, search, scroll, read, click, and fill pages to complete concrete Facebook requests.',
+    'You have one current primary Anchor browser agent that can freely navigate, search, scroll, read, click, and fill pages to complete concrete Facebook requests.',
+    'Other sessions may exist in discreet history, but every action runs only in the currently selected primary session.',
     'Reply naturally to greetings, questions, brainstorming, explanations, and drafting requests without using a browser.',
     'Questions about you, your capabilities, your status, what you are doing, or the current task are always conversation. Never start or queue a browser action for those questions.',
     'Choose mode "action" only when the user clearly asks you to inspect, navigate, search, read, or change Facebook now.',
@@ -407,10 +469,10 @@ function executionPrompt(prompt, isWrite, history = []) {
   ].filter(Boolean).join('\n');
 }
 
-async function runTask(session, prompt, history) {
+async function runTask(session, prompt, history, anchorRequest = anchorFetch) {
   const intent = classifyIntent(prompt);
   const url = `/tools/perform-web-task?sessionId=${encodeURIComponent(session.sessionId)}`;
-  const result = await anchorFetch(url, {
+  const result = await anchorRequest(url, {
     method: 'POST',
     body: JSON.stringify({
       prompt: executionPrompt(prompt, intent.needsConfirmation, history),
@@ -445,12 +507,12 @@ async function serveStatic(url, res) {
   }
 }
 
-export function createApp({ agentResponder = converseWithGemini } = {}) {
+export function createApp({ agentResponder = converseWithGemini, anchorRequest = anchorFetch, prepareFacebookSession = prepareFacebook } = {}) {
   return createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     try {
       if (url.pathname === '/health') {
-        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), agentConfigured: Boolean(GEMINI_API_KEY), version: '1.3.0' });
+        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), agentConfigured: Boolean(GEMINI_API_KEY), sessionUser: SESSION_USER, version: '1.4.0' });
       }
       if (url.pathname.startsWith('/api/') && !authorized(req)) return json(res, 401, { ok: false, error: 'Access key required.' });
 
@@ -458,32 +520,62 @@ export function createApp({ agentResponder = converseWithGemini } = {}) {
         return json(res, 200, { ok: true, cookies: DEFAULT_FACEBOOK_COOKIES || null });
       }
 
+      if (req.method === 'GET' && url.pathname === '/api/sessions') {
+        const history = await listKittySessions(anchorRequest);
+        const running = history.filter((item) => item.status === 'running');
+        return json(res, 200, {
+          ok: true,
+          user: SESSION_USER,
+          idleMinutes: SESSION_IDLE_MINUTES,
+          sessions: history,
+          activeSession: running[0] || null,
+        });
+      }
+
+      const recordingMatch = req.method === 'GET'
+        ? url.pathname.match(/^\/api\/sessions\/([^/]+)\/recording$/)
+        : null;
+      if (recordingMatch) {
+        const sessionId = decodeURIComponent(recordingMatch[1]);
+        const remote = await anchorRequest(`/sessions/${encodeURIComponent(sessionId)}`);
+        if (!sessionBelongsToKitty(remote)) return json(res, 404, { ok: false, error: 'Session not found.' });
+        const recordings = await anchorRequest(`/sessions/${encodeURIComponent(sessionId)}/recordings`);
+        const items = Array.isArray(recordings?.items) ? recordings.items : [];
+        const recording = items.find((item) => item?.is_primary) || items[0];
+        if (!recording?.file_link) return json(res, 404, { ok: false, error: 'Recording is not ready yet.' });
+        return json(res, 200, {
+          ok: true,
+          recording: {
+            sessionId,
+            url: recording.file_link,
+            duration: recording.duration || null,
+            createdAt: recording.created_at || null,
+          },
+        });
+      }
+
       if (req.method === 'POST' && url.pathname === '/api/session/restore') {
         const input = await bodyJson(req);
-        const clientId = String(input.clientId || '').slice(0, 100);
-        if (!clientId) return json(res, 400, { ok: false, error: 'Missing browser identity.' });
-        const session = await restoreFacebookSession(clientId, input.session || {});
+        const clientId = String(input.clientId || SESSION_USER).slice(0, 100);
+        const session = await restoreFacebookSession(clientId, input.session || {}, anchorRequest);
         return json(res, 200, { ok: true, session: sessionPayload(session) });
       }
 
       if (req.method === 'POST' && url.pathname === '/api/session') {
         const input = await bodyJson(req);
         const clientId = String(input.clientId || crypto.randomUUID()).slice(0, 100);
-        if (input.replace === true) {
-          const existing = sessions.get(clientId) || await restoreFacebookSession(clientId, input.session || {});
-          if (existing) await closeSession(existing);
-        }
-        const session = input.replace === true
-          ? await createFacebookSession(clientId, input.cookies)
-          : await getOrCreateSession(clientId, input.cookies, input.session);
+        const forceNew = input.forceNew === true || input.replace === true;
+        const session = forceNew
+          ? await createFacebookSession(clientId, input.cookies, anchorRequest, prepareFacebookSession)
+          : await getOrCreateSession(clientId, input.cookies, input.session, anchorRequest, prepareFacebookSession);
         return json(res, 200, { ok: true, session: sessionPayload(session) });
       }
 
       if (req.method === 'DELETE' && url.pathname === '/api/session') {
         const input = await bodyJson(req);
-        const clientId = String(input.clientId || '');
-        const record = sessions.get(clientId) || await restoreFacebookSession(clientId, input.session || {});
-        if (record) await closeSession(record);
+        const clientId = String(input.clientId || SESSION_USER);
+        const record = await restoreFacebookSession(clientId, input.session || {}, anchorRequest);
+        if (record) await closeSession(record, anchorRequest);
         return json(res, 200, { ok: true });
       }
 
@@ -519,14 +611,14 @@ export function createApp({ agentResponder = converseWithGemini } = {}) {
         const intent = classifyIntent(prompt);
         if (!prompt || !clientId) return json(res, 400, { ok: false, error: 'Missing request or browser session.' });
         if (intent.needsConfirmation && input.confirmed !== true) return json(res, 409, { ok: false, needsConfirmation: true, prompt, ...intent });
-        const session = await getOrCreateSession(clientId, input.cookies, input.session);
-        const task = await runTask(session, prompt, input.history);
+        const session = await getOrCreateSession(clientId, input.cookies, input.session, anchorRequest, prepareFacebookSession);
+        const task = await runTask(session, prompt, input.history, anchorRequest);
         return json(res, 200, { ok: true, task, session: { sessionId: session.sessionId, liveViewUrl: session.liveViewUrl, authenticated: session.authenticated } });
       }
 
       if (req.method === 'GET' && url.pathname.startsWith('/api/task/')) {
         const workflowId = decodeURIComponent(url.pathname.slice('/api/task/'.length));
-        const status = await anchorFetch(`/tools/perform-web-task/${encodeURIComponent(workflowId)}/status`);
+        const status = await anchorRequest(`/tools/perform-web-task/${encodeURIComponent(workflowId)}/status`);
         return json(res, 200, { ok: true, status });
       }
 

@@ -18,6 +18,26 @@
         <span><strong>ANCHOR</strong><small>from anywhere</small></span>
       </a>
       <div class="header-actions">
+        <details class="session-history" id="session-history">
+          <summary aria-label="Open session history">History</summary>
+          <div class="history-menu">
+            <div class="history-heading">
+              <div>
+                <p class="eyebrow">ANCHOR HISTORY</p>
+                <h2><span id="history-user">kittyfb</span></h2>
+              </div>
+              <span class="history-count" id="history-count">0</span>
+            </div>
+            <p class="history-note" id="history-note">Sessions are restored from Anchor. No database is used.</p>
+            <div class="history-actions">
+              <button id="new-session" class="primary" type="button">New parallel session</button>
+              <button id="close-session" class="ghost" type="button" hidden>End current</button>
+            </div>
+            <div class="history-list" id="session-history-list" aria-live="polite">
+              <p class="history-empty">Open History after unlocking to see previous sessions.</p>
+            </div>
+          </div>
+        </details>
         <button class="settings-button" id="open-cookies" type="button" aria-label="Facebook cookie settings">Cookies</button>
         <div class="connection" id="connection"><span></span><b>Ready</b></div>
       </div>
@@ -48,13 +68,11 @@
             <button class="primary" id="start-session" type="button">Create Facebook session</button>
           </div>
           <iframe id="live-browser" title="Live Anchor Browser session" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-pointer-lock allow-top-navigation-by-user-activation" allow="clipboard-read; clipboard-write; fullscreen" hidden></iframe>
+          <video id="session-replay" controls playsinline preload="metadata" hidden></video>
         </div>
         <div class="session-strip">
           <span id="session-state">Session off</span>
-          <div class="session-actions">
-            <button id="new-session" class="text-button" type="button" hidden>New session</button>
-            <button id="close-session" class="text-button" type="button" hidden>End session</button>
-          </div>
+          <button id="return-live" class="text-button" type="button" hidden>Return to live</button>
         </div>
       </article>
 

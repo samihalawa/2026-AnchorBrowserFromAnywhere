@@ -7,6 +7,10 @@ Production: https://anchorbrowser.megawebs.com
 ## What it does
 
 - Starts an interactive remote Facebook browser and embeds its live view.
+- Tags every new app-created session to the fixed Anchor user `kittyfb` and automatically restores the last selected running session, or the newest running session on a new device.
+- Reads recent sessions and recordings directly from Anchor Browser without adding a database.
+- Keeps parallel and recorded sessions inside a discreet History menu so the product still feels like one primary browser.
+- Stops hidden disconnected sessions after 15 minutes and the visible session after 30 minutes of in-app inactivity when no task is running.
 - Accepts natural-language tasks from a chat-style interface.
 - Keeps chat history, drafts, pending confirmations, selected workspace view, the active workflow, queued actions, and the exact Anchor iframe session across refreshes and deployments.
 - Lets the Anchor `browser-use` agent autonomously navigate and complete multi-step Facebook requests in that same session.
@@ -14,7 +18,7 @@ Production: https://anchorbrowser.megawebs.com
 - Requires a second explicit confirmation before posts, comments, messages, reactions, joins, edits, or deletes.
 - Lets the user paste Cookie-Editor JSON once and saves it in that device's local storage.
 - Sends the cookie JSON only when creating/running that user's session, then injects it before Facebook opens.
-- Provides mobile Agent/Live Browser views, a full-screen live-view handoff, and `/browser`, `/cookies`, `/new`, `/chat`, and `/session` commands.
+- Provides mobile Agent/Live Browser views, a full-screen live-view handoff, recording playback, and `/browser`, `/cookies`, `/new`, `/chat`, and `/session` commands. `/new` creates a parallel session without ending the current one.
 
 ## Run locally
 

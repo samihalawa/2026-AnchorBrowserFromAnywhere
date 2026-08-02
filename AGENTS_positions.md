@@ -1,11 +1,23 @@
 INDEX
+2026-08-02 | provider-backed kittyfb history | client-only continuity cannot recover across devices and forbidding parallel sessions was too narrow | do tag sessions kittyfb, discover/replay them from Anchor, keep one primary view, and tuck parallel/history controls into a submenu | don't add a database or expose a permanent session-manager layout | verify a new device autoloads the newest active session, reload preserves selection, recordings play, parallel creation preserves the old session, and inactivity closes sessions
 2026-08-02 | clarification and reload continuity | an agent reply can ask for missing content while still returning action mode, and session-only persistence can omit pending/UI state | do force clarification replies to chat and persist pending confirmation, draft, selected view, collapsed state, history, workflow, queue, cookies, and exact live URL | don't launch Anchor while asking what to publish or restore only the session ID | verify underspecified publish leaves the workflow idle and reload restores chat, pending/UI state, and the same iframe session ID
-2026-08-02 | persistent agent autonomy and mobile intervention | preserving only the remote browser ID still loses chat, running workflows, queued actions, and usable phone input | do persist all agent continuity, reattach the server to the exact remote session before any new creation, and provide mobile chat/browser tabs plus a full-screen live handoff | don't create a replacement session after a deploy or trap human intervention in a tiny iframe | verify chat/workflow survive reload, sequential actions keep one session ID, every new session receives saved cookies, and 390px live input is reachable
+2026-08-02 | SUPERSEDED persistent single-session restriction | the continuity lesson remains, but rejecting parallel sessions conflicts with the corrected product | do keep one primary UI while allowing tagged parallel sessions under History | don't replace the main view with a visible session manager | verify chat/workflow continuity plus provider-backed parallel discovery
 2026-08-02 | conversational agent routing | sending every chat turn directly to Anchor makes greetings create browser tasks | do route every turn through conversational AI and invoke Anchor only for an explicit Facebook action | don't treat every non-write message as a read-only browser command | verify hello returns a chat reply with no workflow, a follow-up preserves context, and an explicit write reaches confirmation
 2026-08-02 | Anchor session continuity | in-memory session state and shutdown cleanup discard a still-running remote browser, while author CSS can keep a hidden empty-state overlay visible | do persist the exact live-view metadata on-device, validate the Anchor session on restore, and enforce `[hidden]` | don't terminate remote sessions during app redeploy or trust the DOM property without rendered proof | verify reload keeps the same ID, New session changes it, End session completes it, and the iframe is visibly unobscured
 2026-08-02 | Coolify Docker health checks | the slim image omits both curl and wget, so a healthy Node process is rejected as unhealthy | do keep curl installed in the production image while Coolify health checks are enabled | don't infer an app crash from repeated `starting` checks | verify Coolify reports healthy and `/health` returns the expected JSON
 2026-08-02 | chatbot scope drift | presets can tempt a fixed-task dashboard instead of the requested conversational agent | do keep the unrestricted prompt and recent chat context as the primary control surface, with presets only as optional shortcuts | don't require users to choose from predefined Facebook actions | verify any free-form prompt reaches Anchor and its result returns to the chat
 2026-08-02 | injected cookies are not authenticated proof | a valid cookie array can still open Facebook's saved-profile chooser | do inject the user-pasted cookies before navigation and keep the live view interactive for login or 2FA | don't label the account connected from cookie count or homepage URL alone | verify the current page text or agent report shows an authenticated Facebook surface
+
+## 2026-08-02 | CURRENT
+
+- project/root: `/Users/samihalawa/git/PROJECTS_CODING/2026-AnchorBrowserFromAnywhere`
+- surface/workflow: provider-backed session attribution, autoload, parallel sessions, hidden history, recording replay, and inactivity cleanup
+- mistaken approach: relying on one device's stored live URL and forbidding concurrent sessions, which prevents cross-device discovery and misses Anchor recordings
+- superior approach: tag every new session `kittyfb`, query Anchor history directly, keep the chosen/newest running session primary, and place parallel/replay controls only inside History
+- evidence: live Anchor list returned 24 app-tagged sessions including one running session and recording metadata; official API supports descending tag filters and recording URLs; user explicitly corrected the single-session restriction
+- trigger terms: `kittyfb`, `last session`, `ongoing`, `parallel`, `history`, `replay`, `no database`, `not a session manager`, `inactive`
+- do: use Anchor as durable session truth with one primary browser; don't: add DB state, surface all sessions permanently, or replace an active session when creating another
+- required verification: new sessions carry all three tags and 15-minute idle timeout, a fresh browser autoloads the active provider session, History is closed by default, replay works, parallel creation preserves the original running ID, and 30-minute inactive primary cleanup is wired
 
 ## 2026-08-02 | CURRENT
 
@@ -18,7 +30,7 @@ INDEX
 - do: keep the browser idle until indispensable content is supplied and restore the entire workspace; don't: start a workflow from an incomplete action or reset the layout on reload
 - required verification: production dialogue returns chat for incomplete publish, JSON parses, and browser reload preserves history, pending confirmation/draft/view state, session ID, and iframe URL
 
-## 2026-08-02 | CURRENT
+## 2026-08-02 | SUPERSEDED
 
 - project/root: `/Users/samihalawa/git/PROJECTS_CODING/2026-AnchorBrowserFromAnywhere`
 - surface/workflow: persistent conversational agent, Anchor tool execution, mobile human intervention
@@ -26,8 +38,8 @@ INDEX
 - superior approach: persist chat/workflow/queue locally, always reattach the backend to the stored running Anchor session before creating another, serialize actions in that session, and expose mobile Agent/Live Browser views with a full-screen handoff and slash commands
 - evidence: user correction in the creation thread plus current `public/app.js`, `server.mjs`, and 390px local renders in `/Users/samihalawa/.codex/visualizations/anchor-mobile-agent-running-chat.png` and `/Users/samihalawa/.codex/visualizations/anchor-mobile-local-browser-live.png`
 - trigger terms: `same session`, `agent freedom`, `autonomous`, `phone`, `embedded browser`, `allow input`, `keyword`, `continue after refresh`
-- do: keep the user talking while one browser agent owns a continuing session; don't: start concurrent/replacement sessions or require step-by-step navigation instructions
-- required verification: rendered 390px chat and live views, cookie-backed session creation, exact session ID across action/reload, persistent chat/workflow state, and human-input/full-screen controls
+- do: retain the continuity/mobile lessons; don't: reuse the obsolete prohibition on parallel sessions
+- required verification before reuse: rendered 390px chat and live views plus provider-backed history showing that one primary session can coexist with hidden parallel sessions
 
 ## 2026-08-02 | CURRENT
 

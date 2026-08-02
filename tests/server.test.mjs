@@ -5,7 +5,11 @@ import {
   classifyIntent,
   createApp,
   isAgentConversation,
+  providerLiveViewUrl,
   recoverableLiveViewUrl,
+  SESSION_USER,
+  sessionBelongsToKitty,
+  sessionHistoryItem,
   shouldClarifyBeforeAction,
   toolInventoryDecision,
 } from '../server.mjs';
@@ -107,7 +111,7 @@ test('tool inventory follows a JSON formatting request from conversation context
   ]);
   const inventory = JSON.parse(jsonDecision.reply);
   assert.equal(inventory.agent, 'Anchor');
-  assert.equal(inventory.browserSession, 'persistent');
+  assert.match(inventory.browserSession, /primary provider-backed session/i);
   assert.ok(inventory.tools.some((tool) => tool.name === 'human_handoff'));
 });
 
@@ -139,6 +143,101 @@ test('only restores the matching Anchor live-view session URL', () => {
   assert.equal(recoverableLiveViewUrl('https://live.anchorbrowser.io/?sessionId=another-session', sessionId), false);
 });
 
+test('provider history is attributed to kittyfb and reconstructs running live links', () => {
+  const running = {
+    id: '3b6caa44-f9d2-4690-b935-aa58db2101c2',
+    status: 'running',
+    tags: ['anchorbrowser-from-anywhere', 'facebook', 'kittyfb'],
+    recording: true,
+    created_at: '2026-08-02T20:16:31.240Z',
+  };
+  assert.equal(SESSION_USER, 'kittyfb');
+  assert.equal(sessionBelongsToKitty(running), true);
+  assert.equal(sessionBelongsToKitty({ ...running, tags: ['other-app'] }), false);
+  const item = sessionHistoryItem(running);
+  assert.equal(item.user, 'kittyfb');
+  assert.equal(item.liveViewUrl, providerLiveViewUrl(running.id));
+  assert.equal(item.taggedUser, true);
+});
+
+test('session history endpoint chooses the newest running app session without a database', async () => {
+  const sessions = [
+    { id: 'new-live', status: 'running', tags: ['anchorbrowser-from-anywhere', 'facebook', 'kittyfb'], recording: true, created_at: '2026-08-02T20:20:00Z' },
+    { id: 'older-recording', status: 'completed', tags: ['anchorbrowser-from-anywhere', 'facebook'], recording: true, duration: 90, created_at: '2026-08-02T19:20:00Z' },
+    { id: 'other-user', status: 'running', tags: ['another-app'], recording: true, created_at: '2026-08-02T21:20:00Z' },
+  ];
+  const server = createApp({ anchorRequest: async (path) => {
+    assert.match(path, /^\/sessions\?/);
+    return { sessions };
+  } });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/sessions`, {
+    headers: { 'x-access-key': process.env.APP_ACCESS_KEY || '' },
+  });
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(payload.user, 'kittyfb');
+  assert.equal(payload.idleMinutes, 15);
+  assert.equal(payload.sessions.length, 2);
+  assert.equal(payload.activeSession.sessionId, 'new-live');
+  await new Promise((resolve) => server.close(resolve));
+});
+
+test('recording endpoint exposes only a provider recording belonging to this app user', async () => {
+  const server = createApp({ anchorRequest: async (path) => {
+    if (path === '/sessions/recorded-session') {
+      return { session_id: 'recorded-session', status: 'completed', tags: ['anchorbrowser-from-anywhere', 'facebook', 'kittyfb'] };
+    }
+    if (path === '/sessions/recorded-session/recordings') {
+      return { items: [{ id: 'primary', is_primary: true, file_link: 'https://recordings.example/session.mp4', duration: '00:01:30' }] };
+    }
+    throw new Error(`Unexpected Anchor request: ${path}`);
+  } });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/sessions/recorded-session/recording`, {
+    headers: { 'x-access-key': process.env.APP_ACCESS_KEY || '' },
+  });
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(payload.recording.sessionId, 'recorded-session');
+  assert.equal(payload.recording.url, 'https://recordings.example/session.mp4');
+  await new Promise((resolve) => server.close(resolve));
+});
+
+test('new sessions are parallel, tagged kittyfb, recorded, and expire after inactivity', async () => {
+  const calls = [];
+  const server = createApp({
+    anchorRequest: async (path, options = {}) => {
+      calls.push({ path, options });
+      if (path === '/sessions' && options.method === 'POST') {
+        return { id: 'parallel-session', cdp_url: 'wss://example.invalid', live_view_url: providerLiveViewUrl('parallel-session') };
+      }
+      throw new Error(`Unexpected Anchor request: ${path}`);
+    },
+    prepareFacebookSession: async () => ({ authenticated: true, url: 'https://www.facebook.com/', cookiesApplied: 4 }),
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/session`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-access-key': process.env.APP_ACCESS_KEY || '' },
+    body: JSON.stringify({
+      clientId: 'device',
+      forceNew: true,
+      cookies: ['c_user', 'xs', 'datr', 'sb'].map((name) => ({ name, value: 'value' })),
+      session: { sessionId: 'existing-session', liveViewUrl: providerLiveViewUrl('existing-session') },
+    }),
+  });
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(payload.session.sessionId, 'parallel-session');
+  assert.equal(calls.some((call) => call.options.method === 'DELETE'), false);
+  const config = JSON.parse(calls[0].options.body);
+  assert.deepEqual(config.session.tags, ['anchorbrowser-from-anywhere', 'facebook', 'kittyfb']);
+  assert.deepEqual(config.session.timeout, { idle_timeout: 15, max_duration: 1440 });
+  assert.deepEqual(config.session.recording, { active: true });
+  await new Promise((resolve) => server.close(resolve));
+});
+
 test('client persists agent continuity and passes the current session back to actions', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(source, /anchor-chat-history/);
@@ -151,6 +250,8 @@ test('client persists agent continuity and passes the current session back to ac
   assert.match(source, /session: state\.session/);
   assert.match(source, /resumeWorkflow/);
   assert.match(source, /restorePendingConfirmation/);
+  assert.match(source, /loadSessionHistory\(true\)/);
+  assert.match(source, /CLIENT_IDLE_CLOSE_MS = 30 \* 60 \* 1000/);
 });
 
 test('mobile UI exposes chat, live browser, full-screen input, and slash commands', async () => {
@@ -160,8 +261,12 @@ test('mobile UI exposes chat, live browser, full-screen input, and slash command
   ]);
   assert.match(html, /data-mobile-view="browser"/);
   assert.match(html, /id="open-live"/);
+  assert.match(html, /id="session-history"/);
+  assert.match(html, /id="session-replay"/);
+  assert.match(html, /New parallel session/);
   assert.match(html, /data-command="\/browser"/);
   assert.match(css, /body\[data-mobile-view="browser"\] \.chat-card/);
+  assert.match(css, /\.history-menu/);
 });
 
 test('health exposes deployment identity without secrets', async () => {
@@ -173,7 +278,8 @@ test('health exposes deployment identity without secrets', async () => {
   assert.equal(response.status, 200);
   assert.equal(payload.ok, true);
   assert.equal(payload.service, 'anchor-browser-from-anywhere');
-  assert.equal(payload.version, '1.3.0');
+  assert.equal(payload.version, '1.4.0');
+  assert.equal(payload.sessionUser, 'kittyfb');
   assert.equal('cookies' in payload, false);
   await new Promise((resolve) => server.close(resolve));
 });

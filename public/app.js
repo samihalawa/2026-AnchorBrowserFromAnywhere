@@ -23,6 +23,8 @@ const state = {
   mobileView: localStorage.getItem('anchor-mobile-view') || 'chat',
   browserCollapsed: localStorage.getItem('anchor-browser-collapsed') === 'true',
   draft: localStorage.getItem('anchor-chat-draft') || '',
+  sessionHistory: [],
+  replay: null,
 };
 if (!Array.isArray(state.history)) state.history = [];
 if (!Array.isArray(state.actionQueue)) state.actionQueue = [];
@@ -34,8 +36,11 @@ const connection = $('#connection');
 const browserStage = $('#browser-stage');
 const browserEmpty = $('#browser-empty');
 const liveBrowser = $('#live-browser');
+const sessionReplay = $('#session-replay');
 const messages = $('#messages');
 const promptInput = $('#prompt');
+const CLIENT_IDLE_CLOSE_MS = 30 * 60 * 1000;
+let idleCloseTimer = null;
 
 function persistHistory() {
   state.history = state.history.slice(-30);
@@ -57,13 +62,16 @@ function saveWorkflow(workflow) {
   state.workflowId = workflow?.workflowId || null;
   if (workflow) localStorage.setItem('anchor-active-workflow', JSON.stringify(workflow));
   else localStorage.removeItem('anchor-active-workflow');
-  $('#new-session').disabled = Boolean(workflow);
   $('#close-session').disabled = Boolean(workflow);
+  if (workflow) clearTimeout(idleCloseTimer);
+  else armIdleClose();
 }
 
 function setStatus(label, mode = '') {
   connection.className = `connection ${mode}`.trim();
   connection.querySelector('b').textContent = label;
+  connection.title = label;
+  connection.setAttribute('aria-label', label);
 }
 
 function addMessage(text, role = 'assistant', error = false, track = true) {
@@ -137,7 +145,18 @@ async function api(path, options = {}) {
   return payload;
 }
 
+function clearReplay() {
+  state.replay = null;
+  sessionReplay.pause();
+  sessionReplay.removeAttribute('src');
+  sessionReplay.load();
+  sessionReplay.hidden = true;
+  $('#return-live').hidden = true;
+}
+
 function clearSessionView() {
+  clearTimeout(idleCloseTimer);
+  clearReplay();
   state.session = null;
   state.storedSession = null;
   state.workflowId = null;
@@ -147,28 +166,129 @@ function clearSessionView() {
   localStorage.removeItem('anchor-active-session');
   liveBrowser.src = 'about:blank';
   $('#open-live').href = '#';
+  $('#open-live').textContent = 'Open full screen';
   $('#open-live').hidden = true;
   liveBrowser.hidden = true;
   browserEmpty.hidden = false;
-  $('#new-session').hidden = true;
   $('#close-session').hidden = true;
   $('#session-state').textContent = 'Session off';
   setStatus('Ready');
 }
 
 function showSession(session, restored = false) {
+  clearReplay();
   state.session = session;
   state.storedSession = session;
   localStorage.setItem('anchor-active-session', JSON.stringify(session));
   liveBrowser.src = session.liveViewUrl;
   $('#open-live').href = session.liveViewUrl;
+  $('#open-live').textContent = 'Open full screen';
   $('#open-live').hidden = false;
   liveBrowser.hidden = false;
   browserEmpty.hidden = true;
-  $('#new-session').hidden = false;
   $('#close-session').hidden = false;
   $('#session-state').textContent = restored ? 'Existing session restored' : (session.authenticated ? 'Facebook connected' : 'Login available in live view');
   setStatus(session.authenticated ? 'Facebook live' : 'Browser live', 'live');
+  armIdleClose();
+}
+
+function formatSessionDate(value) {
+  if (!value) return 'Earlier session';
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function formatDuration(seconds) {
+  const total = Math.max(0, Number(seconds || 0));
+  if (!total) return '';
+  if (total < 60) return `${Math.round(total)} sec`;
+  if (total < 3600) return `${Math.round(total / 60)} min`;
+  return `${Math.round(total / 360) / 10} hr`;
+}
+
+function renderSessionHistory() {
+  const list = $('#session-history-list');
+  list.replaceChildren();
+  $('#history-count').textContent = String(state.sessionHistory.length);
+  if (!state.sessionHistory.length) {
+    const empty = document.createElement('p');
+    empty.className = 'history-empty';
+    empty.textContent = 'No Anchor sessions yet.';
+    list.append(empty);
+    return;
+  }
+  for (const session of state.sessionHistory) {
+    const row = document.createElement('div');
+    row.className = 'history-item';
+    if (session.sessionId === state.session?.sessionId) row.classList.add('current');
+    const copy = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = formatSessionDate(session.createdAt);
+    const detail = document.createElement('small');
+    const duration = formatDuration(session.duration);
+    detail.textContent = session.status === 'running'
+      ? (session.sessionId === state.session?.sessionId ? 'Live now · current' : 'Live now')
+      : `Recorded${duration ? ` · ${duration}` : ''}`;
+    copy.append(title, detail);
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'history-open';
+    action.textContent = session.status === 'running' ? 'Open' : 'Replay';
+    action.addEventListener('click', async () => {
+      action.disabled = true;
+      try {
+        if (session.status === 'running') await restoreSession(session);
+        else await showReplay(session);
+        $('#session-history').open = false;
+        setMobileView('browser');
+      } catch (error) {
+        addMessage(error.message, 'assistant', true);
+      } finally {
+        action.disabled = false;
+      }
+    });
+    row.append(copy, action);
+    list.append(row);
+  }
+}
+
+async function loadSessionHistory(autoload = false) {
+  const payload = await api('/api/sessions');
+  state.sessionHistory = Array.isArray(payload.sessions) ? payload.sessions : [];
+  $('#history-user').textContent = payload.user || 'kittyfb';
+  $('#history-note').textContent = `Saved by Anchor · hidden sessions stop after ${payload.idleMinutes || 15} minutes disconnected.`;
+  renderSessionHistory();
+  if (!autoload || state.session) return payload;
+  const stored = state.sessionHistory.find((item) => item.status === 'running' && item.sessionId === state.storedSession?.sessionId);
+  const candidate = stored || payload.activeSession;
+  if (!candidate) return payload;
+  const exact = stored && state.storedSession?.liveViewUrl
+    ? { ...candidate, ...state.storedSession, status: candidate.status }
+    : candidate;
+  await restoreSession(exact);
+  return payload;
+}
+
+async function showReplay(session) {
+  setStatus('Loading replay…', 'busy');
+  const payload = await api(`/api/sessions/${encodeURIComponent(session.sessionId)}/recording`);
+  clearReplay();
+  state.replay = session;
+  liveBrowser.hidden = true;
+  browserEmpty.hidden = true;
+  sessionReplay.src = payload.recording.url;
+  sessionReplay.hidden = false;
+  $('#open-live').href = payload.recording.url;
+  $('#open-live').textContent = 'Open recording';
+  $('#open-live').hidden = false;
+  $('#return-live').hidden = false;
+  $('#session-state').textContent = `Replay · ${formatSessionDate(session.createdAt)}`;
+  setStatus('Replay');
+  void sessionReplay.play().catch(() => {});
 }
 
 async function loadDefaultCookies() {
@@ -181,22 +301,23 @@ async function loadDefaultCookies() {
   localStorage.setItem('anchor-facebook-cookies', state.cookies);
 }
 
-async function restoreSession() {
-  if (!state.storedSession?.sessionId || !state.storedSession?.liveViewUrl) return null;
+async function restoreSession(candidate = state.storedSession) {
+  if (!candidate?.sessionId) return null;
   const payload = await api('/api/session/restore', {
     method: 'POST',
-    body: JSON.stringify({ clientId: state.clientId, session: state.storedSession }),
+    body: JSON.stringify({ clientId: state.clientId, session: candidate }),
   });
   if (!payload.session) {
-    clearSessionView();
+    if (candidate.sessionId === state.storedSession?.sessionId) clearSessionView();
     return null;
   }
   showSession(payload.session, true);
-  addMessage('Your existing Anchor browser session is open again. Continue chatting, start a new session, or end it.', 'assistant', false, false);
+  renderSessionHistory();
+  addMessage('Your existing Anchor browser session is open again. Continue chatting normally; older sessions stay tucked inside History.', 'assistant', false, false);
   return payload.session;
 }
 
-async function startSession(replace = false) {
+async function startSession(forceNew = false) {
   if (!state.cookies) {
     $('#cookies-dialog').showModal();
     throw new Error('Paste your Facebook cookies before starting a session.');
@@ -205,17 +326,20 @@ async function startSession(replace = false) {
   $('#start-session').disabled = true;
   $('#new-session').disabled = true;
   try {
+    const keepCurrent = Boolean(forceNew && state.workflowId && state.session);
     const payload = await api('/api/session', {
       method: 'POST',
-      body: JSON.stringify({ clientId: state.clientId, cookies: state.cookies, replace, session: state.storedSession }),
+      body: JSON.stringify({ clientId: state.clientId, cookies: state.cookies, forceNew, session: state.storedSession }),
     });
-    showSession(payload.session);
-    addMessage(state.session.authenticated
-      ? 'Your Facebook browser is live. Send me a request below.'
-      : 'The browser is live with your saved cookies and persistent Anchor profile. If Facebook asks, finish login or two-factor verification in the live view.');
-    return state.session;
+    if (!keepCurrent) showSession(payload.session);
+    await loadSessionHistory(false);
+    addMessage(keepCurrent
+      ? 'A parallel browser session was created and saved in History. The current working session stays in the main view until its task finishes.'
+      : (payload.session.authenticated
+        ? 'Your Facebook browser is live. Send me a request below.'
+        : 'The browser is live with your saved cookies and persistent Anchor profile. If Facebook asks, finish login or two-factor verification in the live view.'));
+    return keepCurrent ? state.session : payload.session;
   } catch (error) {
-    if (replace) clearSessionView();
     setStatus('Could not start');
     addMessage(error.message, 'assistant', true);
     throw error;
@@ -225,18 +349,34 @@ async function startSession(replace = false) {
   }
 }
 
-async function closeSession() {
-  await api('/api/session', { method: 'DELETE', body: JSON.stringify({ clientId: state.clientId, session: state.storedSession }) }).catch(() => {});
+async function closeSession(reason = 'manual') {
+  if (!state.session) return;
+  if (state.workflowId) {
+    if (reason === 'inactive') return armIdleClose();
+    addMessage('The current browser task is still running, so I kept its session open. You can create a parallel session from History.', 'assistant');
+    return;
+  }
+  const closedId = state.session.sessionId;
+  await api('/api/session', { method: 'DELETE', body: JSON.stringify({ clientId: state.clientId, session: state.session }) }).catch(() => {});
   clearSessionView();
+  await loadSessionHistory(false).catch(() => {});
+  state.sessionHistory = state.sessionHistory.filter((item) => item.sessionId !== closedId);
+  renderSessionHistory();
+  await loadSessionHistory(true).catch(() => {});
+  if (reason === 'inactive') addMessage('The inactive browser session was stopped. Its recording remains under History.', 'assistant');
 }
 
 async function ensureSession() {
   if (state.session) return state.session;
-  if (state.storedSession) {
-    const restored = await restoreSession();
-    if (restored) return restored;
-  }
+  await loadSessionHistory(true);
+  if (state.session) return state.session;
   return startSession(false);
+}
+
+function armIdleClose() {
+  clearTimeout(idleCloseTimer);
+  if (!state.session || state.workflowId) return;
+  idleCloseTimer = setTimeout(() => void closeSession('inactive'), CLIENT_IDLE_CLOSE_MS);
 }
 
 function readTaskResult(statusPayload) {
@@ -371,18 +511,14 @@ async function handleCommand(prompt) {
     return true;
   }
   if (command === '/new') {
-    if (state.workflowId) {
-      addMessage('The browser agent is still working. I’ll keep this session stable; start a new one after the current action finishes.');
-      return true;
-    }
     await startSession(true);
     setMobileView('browser');
     return true;
   }
   if (command === '/session') {
     addMessage(state.session
-      ? 'The agent is using the current persistent browser session. Use /browser to interact with it, or /new to replace it with a cookie-backed session.'
-      : 'No browser is running yet. Your first Facebook action or /browser will create one using the saved cookies.');
+      ? 'The agent is using the current primary kittyfb session. Use /browser to interact with it; /new creates a parallel cookie-backed session and older sessions stay under History.'
+      : 'No browser is running yet. I’ll restore the newest active kittyfb session from Anchor, or create one with the saved cookies.');
     return true;
   }
   addMessage('Unknown command. Use /browser, /chat, /cookies, /new, or /session.');
@@ -437,7 +573,14 @@ document.querySelectorAll('[data-mobile-view]').forEach((button) => {
 
 $('#start-session').addEventListener('click', () => startSession(false));
 $('#new-session').addEventListener('click', () => startSession(true));
-$('#close-session').addEventListener('click', closeSession);
+$('#close-session').addEventListener('click', () => closeSession('manual'));
+$('#return-live').addEventListener('click', () => {
+  if (state.session) showSession(state.session, true);
+  else clearSessionView();
+});
+$('#session-history').addEventListener('toggle', (event) => {
+  if (event.currentTarget.open && state.accessKey) void loadSessionHistory(false).catch((error) => addMessage(error.message, 'assistant', true));
+});
 $('#open-cookies').addEventListener('click', () => {
   $('#cookies-json').value = state.cookies;
   $('#cookie-status').textContent = state.cookies ? 'Cookies saved on this device.' : 'Required: c_user, xs, datr and sb';
@@ -468,7 +611,7 @@ $('#unlock-form').addEventListener('submit', async (event) => {
     unlockDialog.close();
     setStatus('Ready');
     await loadDefaultCookies();
-    await restoreSession();
+    await loadSessionHistory(true);
     void resumeWorkflow();
     restorePendingConfirmation();
   } catch (error) {
@@ -511,7 +654,7 @@ async function boot() {
   setStatus('Ready');
   try {
     await loadDefaultCookies();
-    await restoreSession();
+    await loadSessionHistory(true);
     void resumeWorkflow();
     restorePendingConfirmation();
   } catch (error) {
@@ -524,6 +667,10 @@ async function boot() {
       addMessage(error.message, 'assistant', true);
     }
   }
+}
+
+for (const eventName of ['pointerdown', 'keydown', 'touchstart']) {
+  window.addEventListener(eventName, armIdleClose, { passive: true });
 }
 
 function resumeWorkflow() {
