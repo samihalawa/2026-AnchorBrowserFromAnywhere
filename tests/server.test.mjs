@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { classifyIntent, createApp, isAgentConversation, recoverableLiveViewUrl } from '../server.mjs';
+import {
+  classifyIntent,
+  createApp,
+  isAgentConversation,
+  recoverableLiveViewUrl,
+  shouldClarifyBeforeAction,
+  toolInventoryDecision,
+} from '../server.mjs';
 
 test('classifies read-only Facebook requests without confirmation', () => {
   assert.deepEqual(classifyIntent('Find recent posts asking for Chinese lessons'), {
@@ -68,6 +75,42 @@ test('agent-status questions remain conversational even if the model misroutes t
   await new Promise((resolve) => server.close(resolve));
 });
 
+test('a missing write detail remains conversational and never starts a browser action', async () => {
+  const decision = {
+    mode: 'action',
+    reply: "Tell me what you'd like to share and I can publish it.",
+    actionPrompt: 'Create a Facebook story containing the text or media the user provides.',
+  };
+  assert.equal(shouldClarifyBeforeAction(decision), true);
+  const server = createApp({ agentResponder: async () => decision });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  const response = await fetch(`http://127.0.0.1:${address.port}/api/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-access-key': process.env.APP_ACCESS_KEY || '' },
+    body: JSON.stringify({ message: 'publish a story', history: [] }),
+  });
+  const payload = await response.json();
+  assert.equal(payload.mode, 'chat');
+  assert.equal(payload.actionPrompt, '');
+  assert.match(payload.reply, /tell me what/i);
+  await new Promise((resolve) => server.close(resolve));
+});
+
+test('tool inventory follows a JSON formatting request from conversation context', () => {
+  const textDecision = toolInventoryDecision('lsit ur tools');
+  assert.equal(textDecision.mode, 'chat');
+  assert.match(textDecision.reply, /navigate:/i);
+  const jsonDecision = toolInventoryDecision('in json', [
+    { role: 'user', text: 'list ur tools' },
+    { role: 'assistant', text: textDecision.reply },
+  ]);
+  const inventory = JSON.parse(jsonDecision.reply);
+  assert.equal(inventory.agent, 'Anchor');
+  assert.equal(inventory.browserSession, 'persistent');
+  assert.ok(inventory.tools.some((tool) => tool.name === 'human_handoff'));
+});
+
 test('agent can route an explicit Facebook request to the existing action pipeline', async () => {
   const server = createApp({
     agentResponder: async () => ({
@@ -101,8 +144,13 @@ test('client persists agent continuity and passes the current session back to ac
   assert.match(source, /anchor-chat-history/);
   assert.match(source, /anchor-active-workflow/);
   assert.match(source, /anchor-action-queue/);
+  assert.match(source, /anchor-pending-prompt/);
+  assert.match(source, /anchor-mobile-view/);
+  assert.match(source, /anchor-browser-collapsed/);
+  assert.match(source, /anchor-chat-draft/);
   assert.match(source, /session: state\.session/);
   assert.match(source, /resumeWorkflow/);
+  assert.match(source, /restorePendingConfirmation/);
 });
 
 test('mobile UI exposes chat, live browser, full-screen input, and slash commands', async () => {
@@ -125,7 +173,7 @@ test('health exposes deployment identity without secrets', async () => {
   assert.equal(response.status, 200);
   assert.equal(payload.ok, true);
   assert.equal(payload.service, 'anchor-browser-from-anywhere');
-  assert.equal(payload.version, '1.2.0');
+  assert.equal(payload.version, '1.3.0');
   assert.equal('cookies' in payload, false);
   await new Promise((resolve) => server.close(resolve));
 });

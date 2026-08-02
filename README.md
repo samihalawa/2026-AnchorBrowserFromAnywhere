@@ -8,7 +8,7 @@ Production: https://anchorbrowser.megawebs.com
 
 - Starts an interactive remote Facebook browser and embeds its live view.
 - Accepts natural-language tasks from a chat-style interface.
-- Keeps chat history, the active workflow, queued actions, and the exact Anchor session across refreshes and deployments.
+- Keeps chat history, drafts, pending confirmations, selected workspace view, the active workflow, queued actions, and the exact Anchor iframe session across refreshes and deployments.
 - Lets the Anchor `browser-use` agent autonomously navigate and complete multi-step Facebook requests in that same session.
 - Runs read-only requests immediately.
 - Requires a second explicit confirmation before posts, comments, messages, reactions, joins, edits, or deletes.

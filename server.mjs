@@ -41,6 +41,48 @@ export function isAgentConversation(prompt) {
   return /\b(what are you doing|what do you do|what did you do|are you (still )?(working|doing)|how are you (working|doing)|current task|task status|your status|agent status)\b/.test(text);
 }
 
+const AGENT_TOOLS = [
+  { name: 'navigate', purpose: 'Open Facebook pages and move between profiles, groups, activity, Marketplace, and Messenger.' },
+  { name: 'search', purpose: 'Search Facebook and filter visible results.' },
+  { name: 'read', purpose: 'Read and summarize visible posts, messages, notifications, listings, and page state.' },
+  { name: 'scroll', purpose: 'Load and inspect more content in feeds, groups, and conversations.' },
+  { name: 'click', purpose: 'Use Facebook buttons, links, menus, and controls.' },
+  { name: 'type', purpose: 'Fill forms and compose posts, comments, stories, and messages.' },
+  { name: 'upload', purpose: 'Attach a user-provided image or file when the task requires it.' },
+  { name: 'human_handoff', purpose: 'Keep the same live session open for login, two-factor authentication, CAPTCHA, or manual input.' },
+];
+
+function asksForToolInventory(message, history = []) {
+  const text = String(message || '').trim().toLowerCase();
+  const direct = /\b(list|lsit|show|describe|what|which)\b.*\b(tools?|capabilit(?:y|ies))\b|\b(tools?|capabilit(?:y|ies))\b.*\b(list|lsit|have|available|use)\b/.test(text);
+  const jsonFollowup = /\bjson\b/.test(text) && cleanHistory(history).slice(-4).some((item) => /\btools?|capabilit(?:y|ies)\b/i.test(item.text));
+  return direct || jsonFollowup;
+}
+
+export function toolInventoryDecision(message, history = []) {
+  if (!asksForToolInventory(message, history)) return null;
+  const inventory = {
+    agent: 'Anchor',
+    conversation: true,
+    browserSession: 'persistent',
+    tools: AGENT_TOOLS,
+  };
+  const wantsJson = /\bjson\b/i.test(String(message || ''));
+  const reply = wantsJson
+    ? JSON.stringify(inventory, null, 2)
+    : `I chat with you directly and use one persistent Facebook browser session only when you ask me to act.\n\n${AGENT_TOOLS.map((tool) => `- ${tool.name}: ${tool.purpose}`).join('\n')}`;
+  return { mode: 'chat', reply, actionPrompt: '' };
+}
+
+export function shouldClarifyBeforeAction(decision) {
+  if (decision?.mode !== 'action') return false;
+  const reply = String(decision.reply || '');
+  const actionPrompt = String(decision.actionPrompt || '');
+  const asksForMissingDetail = /\b(tell me|let me know|please provide|what would you|what do you|which (?:post|story|message|person|group)|who (?:should|do)|where should|when should)\b/i.test(reply);
+  const containsPlaceholder = /\b(the user provides|once (?:the user )?provides?|content to be provided|text or media (?:the user )?provides?)\b/i.test(actionPrompt);
+  return asksForMissingDetail || containsPlaceholder;
+}
+
 function json(res, status, payload) {
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
@@ -288,6 +330,8 @@ function agentInstruction() {
     'For mode "action", reply briefly about what you are about to do and provide a self-contained plain-language actionPrompt for the browser.',
     'Describe the complete outcome, not individual browser steps; the browser agent decides the navigation and tools needed autonomously.',
     'If a missing detail truly prevents action, ask for it naturally in chat. Login, two-factor, CAPTCHA, or manual review can be completed by the user in the same live browser session.',
+    'Whenever your reply asks the user for a missing detail, choose mode "chat" and leave actionPrompt empty. Never launch the browser while waiting for that answer.',
+    'Obey requested output formats. If the user asks for JSON, return valid JSON text in reply and preserve the subject from recent conversation.',
     'The actionPrompt must include the complete requested outcome, including any publish, comment, send, or other visible change; never replace it with only a search step.',
     'Never put JSON, function calls, tool syntax, or code in actionPrompt.',
     'Never claim that a Facebook action completed; the browser tool will report the observed result.',
@@ -406,7 +450,7 @@ export function createApp({ agentResponder = converseWithGemini } = {}) {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     try {
       if (url.pathname === '/health') {
-        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), agentConfigured: Boolean(GEMINI_API_KEY), version: '1.2.0' });
+        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), agentConfigured: Boolean(GEMINI_API_KEY), version: '1.3.0' });
       }
       if (url.pathname.startsWith('/api/') && !authorized(req)) return json(res, 401, { ok: false, error: 'Access key required.' });
 
@@ -455,12 +499,15 @@ export function createApp({ agentResponder = converseWithGemini } = {}) {
         const input = await bodyJson(req);
         const message = String(input.message || '').trim();
         if (!message) return json(res, 400, { ok: false, error: 'Write a message first.' });
-        const decision = await agentResponder(message.slice(0, 4000), input.history);
+        let decision = toolInventoryDecision(message, input.history)
+          || await agentResponder(message.slice(0, 4000), input.history);
         if (isAgentConversation(message)) {
           decision.mode = 'chat';
           decision.actionPrompt = '';
           const activePrompt = String(input.activeWorkflow?.prompt || '').trim();
           if (activePrompt) decision.reply = `I’m currently working on this in the same browser session: ${activePrompt}`;
+        } else if (shouldClarifyBeforeAction(decision)) {
+          decision = { ...decision, mode: 'chat', actionPrompt: '' };
         }
         return json(res, 200, { ok: true, ...decision });
       }

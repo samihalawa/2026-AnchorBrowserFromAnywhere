@@ -13,13 +13,16 @@ const state = {
   accessKey: sessionStorage.getItem('anchor-access-key') || '',
   clientId: localStorage.getItem('anchor-client-id') || crypto.randomUUID(),
   session: null,
-  pendingPrompt: '',
+  pendingPrompt: localStorage.getItem('anchor-pending-prompt') || '',
   workflowId: null,
   history: readStoredJSON('anchor-chat-history', []),
   workflow: readStoredJSON('anchor-active-workflow', null),
   actionQueue: readStoredJSON('anchor-action-queue', []),
   cookies: localStorage.getItem('anchor-facebook-cookies') || '',
   storedSession: readStoredJSON('anchor-active-session', null),
+  mobileView: localStorage.getItem('anchor-mobile-view') || 'chat',
+  browserCollapsed: localStorage.getItem('anchor-browser-collapsed') === 'true',
+  draft: localStorage.getItem('anchor-chat-draft') || '',
 };
 if (!Array.isArray(state.history)) state.history = [];
 if (!Array.isArray(state.actionQueue)) state.actionQueue = [];
@@ -41,6 +44,12 @@ function persistHistory() {
 
 function persistQueue() {
   localStorage.setItem('anchor-action-queue', JSON.stringify(state.actionQueue));
+}
+
+function savePendingPrompt(prompt = '') {
+  state.pendingPrompt = String(prompt || '');
+  if (state.pendingPrompt) localStorage.setItem('anchor-pending-prompt', state.pendingPrompt);
+  else localStorage.removeItem('anchor-pending-prompt');
 }
 
 function saveWorkflow(workflow) {
@@ -85,10 +94,28 @@ function renderStoredHistory() {
 
 function setMobileView(view) {
   const next = view === 'browser' ? 'browser' : 'chat';
+  state.mobileView = next;
+  localStorage.setItem('anchor-mobile-view', next);
   document.body.dataset.mobileView = next;
   document.querySelectorAll('[data-mobile-view]').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.mobileView === next));
   });
+}
+
+function setBrowserCollapsed(collapsed) {
+  state.browserCollapsed = Boolean(collapsed);
+  localStorage.setItem('anchor-browser-collapsed', String(state.browserCollapsed));
+  browserStage.classList.toggle('collapsed', state.browserCollapsed);
+  $('#toggle-browser').textContent = state.browserCollapsed ? 'Show view' : 'Hide view';
+  $('#toggle-browser').setAttribute('aria-expanded', String(!state.browserCollapsed));
+}
+
+function restorePendingConfirmation() {
+  if (!state.pendingPrompt || state.workflowId || confirmDialog.open) return;
+  $('#confirm-prompt').textContent = state.pendingPrompt;
+  confirmDialog.returnValue = '';
+  confirmDialog.showModal();
+  setStatus('Waiting for confirmation');
 }
 
 async function api(path, options = {}) {
@@ -313,8 +340,9 @@ async function submitPrompt(prompt) {
   const actionPrompt = agent.actionPrompt || prompt;
   const preview = await api('/api/preview', { method: 'POST', body: JSON.stringify({ prompt: actionPrompt }) });
   if (preview.needsConfirmation) {
-    state.pendingPrompt = actionPrompt;
+    savePendingPrompt(actionPrompt);
     $('#confirm-prompt').textContent = actionPrompt;
+    confirmDialog.returnValue = '';
     confirmDialog.showModal();
     setStatus('Waiting for confirmation');
     return;
@@ -366,6 +394,8 @@ $('#composer').addEventListener('submit', async (event) => {
   const prompt = promptInput.value.trim();
   if (!prompt) return;
   promptInput.value = '';
+  state.draft = '';
+  localStorage.removeItem('anchor-chat-draft');
   try { await submitPrompt(prompt); } catch (error) {
     if (error.status === 401) unlockDialog.showModal();
     else addMessage(error.message, 'assistant', true);
@@ -379,9 +409,17 @@ promptInput.addEventListener('keydown', (event) => {
   }
 });
 
+promptInput.addEventListener('input', () => {
+  state.draft = promptInput.value;
+  if (state.draft) localStorage.setItem('anchor-chat-draft', state.draft);
+  else localStorage.removeItem('anchor-chat-draft');
+});
+
 document.querySelectorAll('[data-prompt]').forEach((button) => {
   button.addEventListener('click', () => {
     promptInput.value = button.dataset.prompt;
+    state.draft = promptInput.value;
+    localStorage.setItem('anchor-chat-draft', state.draft);
     promptInput.focus();
   });
 });
@@ -407,15 +445,17 @@ $('#open-cookies').addEventListener('click', () => {
   $('#cookies-dialog').showModal();
 });
 $('#toggle-browser').addEventListener('click', (event) => {
-  const collapsed = browserStage.classList.toggle('collapsed');
-  event.currentTarget.textContent = collapsed ? 'Show view' : 'Hide view';
-  event.currentTarget.setAttribute('aria-expanded', String(!collapsed));
+  setBrowserCollapsed(!state.browserCollapsed);
 });
 
 $('#confirm-run').addEventListener('click', () => {
   const prompt = state.pendingPrompt;
-  state.pendingPrompt = '';
+  savePendingPrompt('');
   if (prompt) execute(prompt, true);
+});
+
+confirmDialog.addEventListener('close', () => {
+  if (confirmDialog.returnValue !== 'confirm') savePendingPrompt('');
 });
 
 $('#unlock-form').addEventListener('submit', async (event) => {
@@ -430,6 +470,7 @@ $('#unlock-form').addEventListener('submit', async (event) => {
     await loadDefaultCookies();
     await restoreSession();
     void resumeWorkflow();
+    restorePendingConfirmation();
   } catch (error) {
     $('#unlock-error').textContent = error.status === 401 ? 'That access key is not correct.' : error.message;
   }
@@ -459,6 +500,9 @@ $('#cookies-form').addEventListener('submit', async (event) => {
 });
 
 async function boot() {
+  promptInput.value = state.draft;
+  setMobileView(state.mobileView);
+  setBrowserCollapsed(state.browserCollapsed);
   renderStoredHistory();
   if (!state.accessKey) {
     unlockDialog.showModal();
@@ -469,6 +513,7 @@ async function boot() {
     await loadDefaultCookies();
     await restoreSession();
     void resumeWorkflow();
+    restorePendingConfirmation();
   } catch (error) {
     if (error.status === 401) {
       sessionStorage.removeItem('anchor-access-key');
