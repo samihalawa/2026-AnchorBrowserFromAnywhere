@@ -286,6 +286,7 @@ test('recording endpoint exposes only a provider recording belonging to this app
 test('new sessions are parallel, tagged to the configured user, recorded, and expire after inactivity', async () => {
   const calls = [];
   const server = createApp({
+    profileName: 'test-profile',
     anchorRequest: async (path, options = {}) => {
       calls.push({ path, options });
       if (path === '/sessions' && options.method === 'POST') {
@@ -314,6 +315,7 @@ test('new sessions are parallel, tagged to the configured user, recorded, and ex
   assert.deepEqual(config.session.tags, ['anchorbrowser-from-anywhere', 'facebook', SESSION_USER]);
   assert.deepEqual(config.session.timeout, { idle_timeout: 15, max_duration: 1440 });
   assert.deepEqual(config.session.recording, { active: true });
+  assert.deepEqual(config.browser.profile, { name: 'test-profile', persist: true });
   await new Promise((resolve) => server.close(resolve));
 });
 
@@ -403,7 +405,7 @@ test('mobile UI exposes chat, live browser, native full screen, reconnect, wake 
 });
 
 test('health exposes deployment identity without secrets', async () => {
-  const server = createApp({ agentContext: TEST_CONTEXT });
+  const server = createApp({ agentContext: TEST_CONTEXT, profileName: 'test-profile' });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   const response = await fetch(`http://127.0.0.1:${address.port}/health`);
@@ -411,7 +413,8 @@ test('health exposes deployment identity without secrets', async () => {
   assert.equal(response.status, 200);
   assert.equal(payload.ok, true);
   assert.equal(payload.service, 'anchor-browser-from-anywhere');
-  assert.equal(payload.version, '1.9.0');
+  assert.equal(payload.profileConfigured, true);
+  assert.equal(payload.version, '1.9.1');
   assert.equal(payload.agentContextVersion, 'test-runtime-config');
   assert.equal(payload.sessionUser, SESSION_USER);
   assert.equal('cookies' in payload, false);

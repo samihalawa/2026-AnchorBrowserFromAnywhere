@@ -43,6 +43,7 @@ Required production variables:
 - `GEMINI_API_KEY`
 - `FACEBOOK_COOKIES_JSON` (the default Cookie-Editor JSON loaded on a device that has not saved its own cookies yet)
 - `SESSION_USER` (the Anchor session tag used for cross-device history and restoration)
+- `ANCHOR_PROFILE_NAME` (the persistent Anchor browser profile used to restore authenticated Facebook storage)
 - `FACEBOOK_AGENT_CONTEXT` (optional JSON or plain-text agent instructions and business context)
 
 The repo-root `.env` is the canonical deployment configuration. Keep Coolify's
@@ -50,7 +51,7 @@ runtime variables synchronized from it. `FACEBOOK_COOKIES_JSON` supplies the
 default cookies; cookies pasted inside the app override that default on the
 current device and remain in local storage.
 
-No account identity, campaign, contact detail, or action-specific content is committed as an application default. `FACEBOOK_AGENT_CONTEXT` in the canonical `.env` is the only durable agent-context source; the app bounds the injected text and still checks live Facebook before using time-sensitive facts.
+No account identity, browser-profile name, campaign, contact detail, or action-specific content is committed as an application default. `ANCHOR_PROFILE_NAME` and `FACEBOOK_AGENT_CONTEXT` come from the canonical `.env`; the app bounds the injected context and still checks live Facebook before using time-sensitive facts.
 
 The app access password is the `APP_ACCESS_KEY` value in the repo-root `.env`.
 

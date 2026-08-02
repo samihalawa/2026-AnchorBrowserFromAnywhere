@@ -1,4 +1,5 @@
 INDEX
+2026-08-03 | authenticated Anchor profile continuity | a stale hardcoded profile plus cookie injection can restore a chooser instead of the authenticated account | do configure a profile saved from a visibly authenticated session through `.env` | don't hardcode a provider profile name or infer login from cookies | verify a fresh profile-only session visibly opens the authenticated Facebook feed
 2026-08-03 | persistent decision-making agent | treating chat as a classifier and Anchor as a fixed macro loses the natural agent behavior the user expects | do let the controller reason about tool use and let the browser agent inspect, choose, adapt, and verify | don't reduce free-form requests to hardcoded workflows or click scripts | verify ordinary dialogue stays conversational and explicit outcomes reach an adaptive live-browser prompt
 2026-08-03 | direct actions plus visual preview truth | an extra approval click blocks the requested autonomous workflow, while promising an image without checking the Facebook preview produces an ugly text-only story | do execute clear actions directly, retain Stop/Pause, require relevant media for visual requests, and verify the final preview before sharing | don't show a confirmation dialog or publish a plain gradient when an image was requested | verify direct `/api/run`, zero confirmation artifacts, paused unwanted task, runtime visual rules, and live action start
 2026-08-03 | SUPERSEDED confirmation across generated verb forms | the conjugation classifier remains useful for read/write execution instructions, but the user explicitly removed the second confirmation gate | do retain accurate read/write classification and direct execution | don't restore the dialog, pending state, or server 409 gate | verify Stop/Pause remains and direct writes reach Anchor
@@ -13,6 +14,17 @@ INDEX
 2026-08-02 | Coolify Docker health checks | the slim image omits both curl and wget, so a healthy Node process is rejected as unhealthy | do keep curl installed in the production image while Coolify health checks are enabled | don't infer an app crash from repeated `starting` checks | verify Coolify reports healthy and `/health` returns the expected JSON
 2026-08-02 | chatbot scope drift | presets can tempt a fixed-task dashboard instead of the requested conversational agent | do keep the unrestricted prompt and recent chat context as the primary control surface, with presets only as optional shortcuts | don't require users to choose from predefined Facebook actions | verify any free-form prompt reaches Anchor and its result returns to the chat
 2026-08-02 | injected cookies are not authenticated proof | a valid cookie array can still open Facebook's saved-profile chooser | do inject the user-pasted cookies before navigation and keep the live view interactive for login or 2FA | don't label the account connected from cookie count or homepage URL alone | verify the current page text or agent report shows an authenticated Facebook surface
+
+## 2026-08-03 | CURRENT
+
+- project/root: `/Users/samihalawa/git/PROJECTS_CODING/2026-AnchorBrowserFromAnywhere`
+- surface/workflow: persistent Anchor profile and authenticated Facebook restoration
+- mistaken approach: hardcoding an older provider profile while treating reinjected cookies as sufficient continuity; a clean session still stopped at Facebook's saved-profile password chooser
+- superior approach: save the visibly authenticated session as a dedicated provider profile and configure its name only through the ignored canonical `.env`
+- evidence: fresh profile-only session `1715c6c6-e213-4740-9ed6-e4bca5bc0c5d` visibly showed `What's on your mind, Zimo?`, the `Zimo Qiu` rail identity, Reels, rental posts, contacts, and a friend request without password entry
+- trigger terms: `profile`, `cookies`, `reload`, `same session`, `authenticated`, `password chooser`, `hardcoded`
+- do: use `ANCHOR_PROFILE_NAME` and provider-backed tags/history; don't: commit a profile identity or claim login from cookie counts
+- required verification: a newly created session using only the configured profile visibly opens the authenticated feed, production health reports profile configuration without exposing its name, and reload restores the tagged running session
 
 ## 2026-08-03 | CURRENT
 

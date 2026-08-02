@@ -12,6 +12,7 @@ const HOST = process.env.HOST || '0.0.0.0';
 const ANCHOR_API_KEY = String(process.env.ANCHOR_API_KEY || process.env.ANCHORBROWSER_API_KEY || '').trim();
 const APP_ACCESS_KEY = String(process.env.APP_ACCESS_KEY || '').trim();
 const DEFAULT_FACEBOOK_COOKIES = String(process.env.FACEBOOK_COOKIES_JSON || '').trim();
+const ANCHOR_PROFILE_NAME = String(process.env.ANCHOR_PROFILE_NAME || '').trim();
 const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || '').trim();
 const GEMINI_MODEL = String(process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite').trim();
 const ANCHOR_API = 'https://api.anchorbrowser.io/v1';
@@ -284,7 +285,7 @@ async function listUserSessions(anchorRequest = anchorFetch) {
   return source.filter(sessionBelongsToUser).map(sessionHistoryItem);
 }
 
-async function createFacebookSession(clientId, cookies, anchorRequest = anchorFetch, prepare = prepareFacebook) {
+async function createFacebookSession(clientId, cookies, anchorRequest = anchorFetch, prepare = prepareFacebook, profileName = ANCHOR_PROFILE_NAME) {
   const data = await anchorRequest('/sessions', {
     method: 'POST',
     body: JSON.stringify({
@@ -298,7 +299,7 @@ async function createFacebookSession(clientId, cookies, anchorRequest = anchorFe
       browser: {
         headless: { active: false },
         viewport: { width: 1280, height: 900 },
-        profile: { name: 'anchorbrowser-from-anywhere-facebook', persist: true },
+        ...(profileName ? { profile: { name: profileName, persist: true } } : {}),
       },
     }),
   });
@@ -316,13 +317,13 @@ async function createFacebookSession(clientId, cookies, anchorRequest = anchorFe
   return record;
 }
 
-async function getOrCreateSession(clientId, cookies, storedSession, anchorRequest = anchorFetch, prepare = prepareFacebook) {
+async function getOrCreateSession(clientId, cookies, storedSession, anchorRequest = anchorFetch, prepare = prepareFacebook, profileName = ANCHOR_PROFILE_NAME) {
   const restored = await restoreFacebookSession(clientId, storedSession || {}, anchorRequest);
   if (restored) return restored;
   const history = await listUserSessions(anchorRequest);
   const latest = history.find((item) => item.status === 'running');
   if (latest) return restoreFacebookSession(clientId, latest, anchorRequest);
-  return createFacebookSession(clientId, cookies, anchorRequest, prepare);
+  return createFacebookSession(clientId, cookies, anchorRequest, prepare, profileName);
 }
 
 async function closeSession(record, anchorRequest = anchorFetch) {
@@ -538,12 +539,12 @@ async function serveStatic(url, res) {
   }
 }
 
-export function createApp({ agentResponder = converseWithGemini, agentContext = FACEBOOK_AGENT_CONTEXT, anchorRequest = anchorFetch, prepareFacebookSession = prepareFacebook } = {}) {
+export function createApp({ agentResponder = converseWithGemini, agentContext = FACEBOOK_AGENT_CONTEXT, anchorRequest = anchorFetch, prepareFacebookSession = prepareFacebook, profileName = ANCHOR_PROFILE_NAME } = {}) {
   return createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     try {
       if (url.pathname === '/health') {
-        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), agentConfigured: Boolean(GEMINI_API_KEY), agentContextVersion: agentContext.version || 'environment', sessionUser: SESSION_USER, version: '1.9.0' });
+        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), profileConfigured: Boolean(profileName), agentConfigured: Boolean(GEMINI_API_KEY), agentContextVersion: agentContext.version || 'environment', sessionUser: SESSION_USER, version: '1.9.1' });
       }
       if (url.pathname.startsWith('/api/') && !authorized(req)) return json(res, 401, { ok: false, error: 'Access key required.' });
 
@@ -597,8 +598,8 @@ export function createApp({ agentResponder = converseWithGemini, agentContext = 
         const clientId = String(input.clientId || crypto.randomUUID()).slice(0, 100);
         const forceNew = input.forceNew === true || input.replace === true;
         const session = forceNew
-          ? await createFacebookSession(clientId, input.cookies, anchorRequest, prepareFacebookSession)
-          : await getOrCreateSession(clientId, input.cookies, input.session, anchorRequest, prepareFacebookSession);
+          ? await createFacebookSession(clientId, input.cookies, anchorRequest, prepareFacebookSession, profileName)
+          : await getOrCreateSession(clientId, input.cookies, input.session, anchorRequest, prepareFacebookSession, profileName);
         return json(res, 200, { ok: true, session: sessionPayload(session) });
       }
 
@@ -653,7 +654,7 @@ export function createApp({ agentResponder = converseWithGemini, agentContext = 
         const clientId = String(input.clientId || '').trim();
         const intent = classifyIntent(prompt);
         if (!prompt || !clientId) return json(res, 400, { ok: false, error: 'Missing request or browser session.' });
-        const session = await getOrCreateSession(clientId, input.cookies, input.session, anchorRequest, prepareFacebookSession);
+        const session = await getOrCreateSession(clientId, input.cookies, input.session, anchorRequest, prepareFacebookSession, profileName);
         const task = await runTask(session, prompt, input.history, agentContext, anchorRequest);
         return json(res, 200, { ok: true, task, session: { sessionId: session.sessionId, liveViewUrl: session.liveViewUrl, authenticated: session.authenticated } });
       }
