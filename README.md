@@ -2,6 +2,8 @@
 
 A deliberately small, mobile-first control panel for running natural-language Facebook tasks in a real Anchor Browser session.
 
+Production: https://anchorbrowser.megawebs.com
+
 ## What it does
 
 - Starts an interactive remote Facebook browser and embeds its live view.
@@ -25,5 +27,7 @@ Required production variables:
 - `APP_ACCESS_KEY`
 
 Facebook cookies are entered inside the app, not configured in Coolify.
+
+The app access password is stored in the 1Password item `Anchor Browser From Anywhere`.
 
 The production Dockerfile is ready for a GitHub-driven Coolify deployment.

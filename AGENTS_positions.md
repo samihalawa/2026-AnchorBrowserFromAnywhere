@@ -1,6 +1,18 @@
 INDEX
+2026-08-02 | Coolify Docker health checks | the slim image omits both curl and wget, so a healthy Node process is rejected as unhealthy | do keep curl installed in the production image while Coolify health checks are enabled | don't infer an app crash from repeated `starting` checks | verify Coolify reports healthy and `/health` returns the expected JSON
 2026-08-02 | chatbot scope drift | presets can tempt a fixed-task dashboard instead of the requested conversational agent | do keep the unrestricted prompt and recent chat context as the primary control surface, with presets only as optional shortcuts | don't require users to choose from predefined Facebook actions | verify any free-form prompt reaches Anchor and its result returns to the chat
 2026-08-02 | injected cookies are not authenticated proof | a valid cookie array can still open Facebook's saved-profile chooser | do inject the user-pasted cookies before navigation and keep the live view interactive for login or 2FA | don't label the account connected from cookie count or homepage URL alone | verify the current page text or agent report shows an authenticated Facebook surface
+
+## 2026-08-02 | CURRENT
+
+- project/root: `/Users/samihalawa/git/PROJECTS_CODING/2026-AnchorBrowserFromAnywhere`
+- surface/workflow: Coolify Dockerfile deployment and `/health` readiness check
+- mistaken approach to avoid: using `node:22-slim` without an HTTP client while Coolify's Docker health check is enabled
+- superior approach: install `curl` in the image and retain the real `/health` route
+- evidence: deployment `lsbwtochmh6rf2a6ngcbaiaa` built the app, but every check reported `/bin/sh: 1: curl: not found` and `wget: not found`
+- trigger terms: `starting`, `unhealthy`, `Coolify healthcheck`, `curl not found`, `wget not found`
+- do: keep the health probe executable; don't: disable readiness checks or misdiagnose the Node server
+- required verification: exact deployed commit reaches `healthy`, then read the JSON body from the public `/health` URL
 
 ## 2026-08-02 | CURRENT
 
