@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyIntent, createApp } from '../server.mjs';
+import { classifyIntent, createApp, recoverableLiveViewUrl } from '../server.mjs';
 
 test('classifies read-only Facebook requests without confirmation', () => {
   assert.deepEqual(classifyIntent('Find recent posts asking for Chinese lessons'), {
@@ -16,6 +16,13 @@ test('requires confirmation for visible Facebook writes in English and Spanish',
   assert.equal(classifyIntent('Comment on these three posts').needsConfirmation, true);
   assert.equal(classifyIntent('Publicar esto en cuatro grupos').needsConfirmation, true);
   assert.equal(classifyIntent('Send her a message').needsConfirmation, true);
+});
+
+test('only restores the matching Anchor live-view session URL', () => {
+  const sessionId = 'f92c54ff-f51c-4962-ba2b-55c58f4fb328';
+  assert.equal(recoverableLiveViewUrl(`https://live.anchorbrowser.io/?sessionId=${sessionId}`, sessionId), true);
+  assert.equal(recoverableLiveViewUrl('https://example.com/?sessionId=' + sessionId, sessionId), false);
+  assert.equal(recoverableLiveViewUrl('https://live.anchorbrowser.io/?sessionId=another-session', sessionId), false);
 });
 
 test('health exposes deployment identity without secrets', async () => {

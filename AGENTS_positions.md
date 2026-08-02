@@ -1,7 +1,19 @@
 INDEX
+2026-08-02 | Anchor session continuity | in-memory session state and shutdown cleanup discard a still-running remote browser, while author CSS can keep a hidden empty-state overlay visible | do persist the exact live-view metadata on-device, validate the Anchor session on restore, and enforce `[hidden]` | don't terminate remote sessions during app redeploy or trust the DOM property without rendered proof | verify reload keeps the same ID, New session changes it, End session completes it, and the iframe is visibly unobscured
 2026-08-02 | Coolify Docker health checks | the slim image omits both curl and wget, so a healthy Node process is rejected as unhealthy | do keep curl installed in the production image while Coolify health checks are enabled | don't infer an app crash from repeated `starting` checks | verify Coolify reports healthy and `/health` returns the expected JSON
 2026-08-02 | chatbot scope drift | presets can tempt a fixed-task dashboard instead of the requested conversational agent | do keep the unrestricted prompt and recent chat context as the primary control surface, with presets only as optional shortcuts | don't require users to choose from predefined Facebook actions | verify any free-form prompt reaches Anchor and its result returns to the chat
 2026-08-02 | injected cookies are not authenticated proof | a valid cookie array can still open Facebook's saved-profile chooser | do inject the user-pasted cookies before navigation and keep the live view interactive for login or 2FA | don't label the account connected from cookie count or homepage URL alone | verify the current page text or agent report shows an authenticated Facebook surface
+
+## 2026-08-02 | CURRENT
+
+- project/root: `/Users/samihalawa/git/PROJECTS_CODING/2026-AnchorBrowserFromAnywhere`
+- surface/workflow: persistent Anchor session restore and mobile live-view rendering
+- mistaken approach to avoid: keeping the session only in the Node map, deleting it on SIGTERM, or assuming `element.hidden=true` defeats an author rule with `display:grid`
+- superior approach: retain the remote session through deploys, store its exact live URL and ID on-device, validate its running state before restore, and force `[hidden]` to `display:none`
+- evidence: local session `9fbb9b92-78e8-4f04-9e44-df6781269580` survived reload with the same ID; New session created `fe33880d-b29e-4f40-80d6-1dc7b84f8c26`; End session changed it from `running` to `completed`
+- trigger terms: `reload`, `existing session`, `new session`, `End session`, `empty overlay`, `hidden iframe`
+- do: prove the full ID/state transition and rendered iframe; don't: infer continuity from localStorage alone
+- required verification: same-layer mobile render plus Anchor API status for the exact IDs
 
 ## 2026-08-02 | CURRENT
 

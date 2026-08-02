@@ -36,14 +36,17 @@
           <div class="browser-empty" id="browser-empty">
             <span class="orbit"><i></i></span>
             <h2>No browser running</h2>
-            <p>Start one private Anchor session, then control it from the chat.</p>
-            <button class="primary" id="start-session" type="button">Start Facebook browser</button>
+            <p>Create one Anchor session, then control it from the chat.</p>
+            <button class="primary" id="start-session" type="button">Create Facebook session</button>
           </div>
           <iframe id="live-browser" title="Live Anchor Browser session" sandbox="allow-same-origin allow-scripts allow-forms allow-popups" allow="clipboard-read; clipboard-write" hidden></iframe>
         </div>
         <div class="session-strip">
           <span id="session-state">Session off</span>
-          <button id="close-session" class="text-button" type="button" hidden>End session</button>
+          <div class="session-actions">
+            <button id="new-session" class="text-button" type="button" hidden>New session</button>
+            <button id="close-session" class="text-button" type="button" hidden>End session</button>
+          </div>
         </div>
       </article>
 
@@ -79,7 +82,7 @@
       <p class="eyebrow">PRIVATE ACCESS</p>
       <h2 id="unlock-title">Open your browser agent</h2>
       <p>Enter the access key for this private control panel.</p>
-      <input id="access-key" type="password" autocomplete="current-password" placeholder="Access key" required>
+      <input id="access-key" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Access key" required>
       <button class="primary" value="unlock">Continue</button>
       <small id="unlock-error"></small>
     </form>

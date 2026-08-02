@@ -11,8 +11,8 @@ const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
 const ANCHOR_API_KEY = String(process.env.ANCHOR_API_KEY || process.env.ANCHORBROWSER_API_KEY || '').trim();
 const APP_ACCESS_KEY = String(process.env.APP_ACCESS_KEY || '').trim();
+const DEFAULT_FACEBOOK_COOKIES = String(process.env.FACEBOOK_COOKIES_JSON || '').trim();
 const ANCHOR_API = 'https://api.anchorbrowser.io/v1';
-const SESSION_MAX_AGE_MS = 35 * 60 * 1000;
 const sessions = new Map();
 
 const MUTATION_WORDS = /\b(post|publish|comment|reply|send|message|like|react|join|follow|invite|delete|remove|edit|change|upload|publica|publicar|comenta|comentar|responde|responder|envia|enviar|mensaje|unirse|seguir|elimina|editar|sube)\b/i;
@@ -194,15 +194,66 @@ async function createFacebookSession(clientId, cookies) {
 
 async function getOrCreateSession(clientId, cookies) {
   const current = sessions.get(clientId);
-  if (current && Date.now() - current.createdAt < SESSION_MAX_AGE_MS) return current;
-  if (current) await closeSession(current).catch(() => {});
+  if (current) return current;
   return createFacebookSession(clientId, cookies);
 }
 
 async function closeSession(record) {
   if (!record?.sessionId) return;
-  await anchorFetch(`/sessions/${encodeURIComponent(record.sessionId)}`, { method: 'DELETE' });
-  sessions.delete(record.clientId);
+  try {
+    await anchorFetch(`/sessions/${encodeURIComponent(record.sessionId)}`, { method: 'DELETE' });
+  } finally {
+    sessions.delete(record.clientId);
+  }
+}
+
+function sessionPayload(record) {
+  if (!record) return null;
+  return {
+    clientId: record.clientId,
+    sessionId: record.sessionId,
+    liveViewUrl: record.liveViewUrl,
+    authenticated: Boolean(record.authenticated),
+    url: record.url || 'https://www.facebook.com/',
+    cookiesApplied: Number(record.cookiesApplied || 0),
+  };
+}
+
+export function recoverableLiveViewUrl(value, sessionId) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:'
+      && url.hostname === 'live.anchorbrowser.io'
+      && url.searchParams.get('sessionId') === sessionId;
+  } catch {
+    return false;
+  }
+}
+
+async function restoreFacebookSession(clientId, input) {
+  const current = sessions.get(clientId);
+  if (current) return current;
+  const sessionId = String(input.sessionId || '').trim();
+  const liveViewUrl = String(input.liveViewUrl || '').trim();
+  if (!sessionId || !recoverableLiveViewUrl(liveViewUrl, sessionId)) return null;
+  try {
+    const remote = await anchorFetch(`/sessions/${encodeURIComponent(sessionId)}`);
+    if (String(remote.status || '').toLowerCase() !== 'running') return null;
+    const record = {
+      clientId,
+      sessionId,
+      liveViewUrl,
+      createdAt: Date.parse(remote.created_at || '') || Date.now(),
+      authenticated: Boolean(input.authenticated),
+      url: String(input.url || 'https://www.facebook.com/'),
+      cookiesApplied: Number(input.cookiesApplied || 0),
+    };
+    sessions.set(clientId, record);
+    return record;
+  } catch (error) {
+    if (/Anchor Browser 404/.test(error.message)) return null;
+    throw error;
+  }
 }
 
 function cleanHistory(value) {
@@ -275,11 +326,24 @@ export function createApp() {
       }
       if (url.pathname.startsWith('/api/') && !authorized(req)) return json(res, 401, { ok: false, error: 'Access key required.' });
 
+      if (req.method === 'GET' && url.pathname === '/api/defaults') {
+        return json(res, 200, { ok: true, cookies: DEFAULT_FACEBOOK_COOKIES || null });
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/session/restore') {
+        const input = await bodyJson(req);
+        const clientId = String(input.clientId || '').slice(0, 100);
+        if (!clientId) return json(res, 400, { ok: false, error: 'Missing browser identity.' });
+        const session = await restoreFacebookSession(clientId, input.session || {});
+        return json(res, 200, { ok: true, session: sessionPayload(session) });
+      }
+
       if (req.method === 'POST' && url.pathname === '/api/session') {
         const input = await bodyJson(req);
         const clientId = String(input.clientId || crypto.randomUUID()).slice(0, 100);
+        if (input.replace === true && sessions.has(clientId)) await closeSession(sessions.get(clientId));
         const session = await getOrCreateSession(clientId, input.cookies);
-        return json(res, 200, { ok: true, session: { clientId, sessionId: session.sessionId, liveViewUrl: session.liveViewUrl, authenticated: session.authenticated, url: session.url, cookiesApplied: session.cookiesApplied } });
+        return json(res, 200, { ok: true, session: sessionPayload(session) });
       }
 
       if (req.method === 'DELETE' && url.pathname === '/api/session') {
@@ -328,7 +392,6 @@ if (process.argv[1] && normalize(process.argv[1]) === normalize(fileURLToPath(im
   const server = createApp();
   server.listen(PORT, HOST, () => console.log(`Anchor Browser From Anywhere listening on http://${HOST}:${PORT}`));
   const shutdown = async () => {
-    await Promise.allSettled([...sessions.values()].map(closeSession));
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 2500).unref();
   };

@@ -10,6 +10,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { min-width: 20rem; background: var(--ink); }
 body {
   margin: 0;
@@ -62,6 +63,7 @@ h2 { margin-bottom: .5rem; font-size: clamp(1.25rem, 4vw, 1.8rem); line-height: 
 .primary.danger { background: var(--coral); color: white; }
 #live-browser { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: white; }
 .session-strip { display: flex; align-items: center; justify-content: space-between; min-height: 3rem; padding: .4rem 1rem; color: var(--muted); font: .76rem DM Mono, monospace; }
+.session-actions { display: flex; align-items: center; gap: .75rem; }
 .text-button { min-height: 2.75rem; text-decoration: underline; text-underline-offset: .2rem; }
 
 .chat-card { display: flex; min-height: 30rem; max-height: 34rem; flex-direction: column; }

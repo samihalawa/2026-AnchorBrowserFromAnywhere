@@ -7,6 +7,7 @@ const state = {
   workflowId: null,
   history: [],
   cookies: localStorage.getItem('anchor-facebook-cookies') || '',
+  storedSession: JSON.parse(localStorage.getItem('anchor-active-session') || 'null'),
 };
 localStorage.setItem('anchor-client-id', state.clientId);
 
@@ -60,48 +61,90 @@ async function api(path, options = {}) {
   return payload;
 }
 
-async function startSession() {
+function clearSessionView() {
+  state.session = null;
+  state.storedSession = null;
+  state.workflowId = null;
+  localStorage.removeItem('anchor-active-session');
+  liveBrowser.src = 'about:blank';
+  liveBrowser.hidden = true;
+  browserEmpty.hidden = false;
+  $('#new-session').hidden = true;
+  $('#close-session').hidden = true;
+  $('#session-state').textContent = 'Session off';
+  setStatus('Ready');
+}
+
+function showSession(session, restored = false) {
+  state.session = session;
+  state.storedSession = session;
+  localStorage.setItem('anchor-active-session', JSON.stringify(session));
+  liveBrowser.src = session.liveViewUrl;
+  liveBrowser.hidden = false;
+  browserEmpty.hidden = true;
+  $('#new-session').hidden = false;
+  $('#close-session').hidden = false;
+  $('#session-state').textContent = restored ? 'Existing session restored' : (session.authenticated ? 'Facebook connected' : 'Login available in live view');
+  setStatus(session.authenticated ? 'Facebook live' : 'Browser live', 'live');
+}
+
+async function loadDefaultCookies() {
+  if (state.cookies) return;
+  const payload = await api('/api/defaults');
+  if (!payload.cookies) return;
+  const parsed = JSON.parse(payload.cookies);
+  if (!Array.isArray(parsed)) return;
+  state.cookies = JSON.stringify(parsed);
+  localStorage.setItem('anchor-facebook-cookies', state.cookies);
+}
+
+async function restoreSession() {
+  if (!state.storedSession?.sessionId || !state.storedSession?.liveViewUrl) return null;
+  const payload = await api('/api/session/restore', {
+    method: 'POST',
+    body: JSON.stringify({ clientId: state.clientId, session: state.storedSession }),
+  });
+  if (!payload.session) {
+    clearSessionView();
+    return null;
+  }
+  showSession(payload.session, true);
+  addMessage('Your existing Anchor browser session is open again. Continue chatting, start a new session, or end it.');
+  return payload.session;
+}
+
+async function startSession(replace = false) {
   if (!state.cookies) {
     $('#cookies-dialog').showModal();
     throw new Error('Paste your Facebook cookies before starting a session.');
   }
   setStatus('Starting…', 'busy');
   $('#start-session').disabled = true;
+  $('#new-session').disabled = true;
   try {
     const payload = await api('/api/session', {
       method: 'POST',
-      body: JSON.stringify({ clientId: state.clientId, cookies: state.cookies }),
+      body: JSON.stringify({ clientId: state.clientId, cookies: state.cookies, replace }),
     });
-    state.session = payload.session;
-    liveBrowser.src = state.session.liveViewUrl;
-    liveBrowser.hidden = false;
-    browserEmpty.hidden = true;
-    $('#close-session').hidden = false;
-    $('#session-state').textContent = state.session.authenticated ? 'Facebook connected' : 'Login needed in live view';
-    setStatus(state.session.authenticated ? 'Facebook live' : 'Login needed', state.session.authenticated ? 'live' : 'busy');
+    showSession(payload.session);
     addMessage(state.session.authenticated
       ? 'Your Facebook browser is live. Send me a request below.'
-      : 'The browser is live, but Facebook needs login or two-factor verification. Complete it in the live view, then send your request.');
+      : 'The browser is live with your saved cookies and persistent Anchor profile. If Facebook asks, finish login or two-factor verification in the live view.');
     return state.session;
   } catch (error) {
+    if (replace) clearSessionView();
     setStatus('Could not start');
     addMessage(error.message, 'assistant', true);
     throw error;
   } finally {
     $('#start-session').disabled = false;
+    $('#new-session').disabled = false;
   }
 }
 
 async function closeSession() {
   await api('/api/session', { method: 'DELETE', body: JSON.stringify({ clientId: state.clientId }) }).catch(() => {});
-  state.session = null;
-  state.workflowId = null;
-  liveBrowser.src = 'about:blank';
-  liveBrowser.hidden = true;
-  browserEmpty.hidden = false;
-  $('#close-session').hidden = true;
-  $('#session-state').textContent = 'Session off';
-  setStatus('Ready');
+  clearSessionView();
 }
 
 function readTaskResult(statusPayload) {
@@ -199,7 +242,8 @@ document.querySelectorAll('[data-prompt]').forEach((button) => {
   });
 });
 
-$('#start-session').addEventListener('click', startSession);
+$('#start-session').addEventListener('click', () => startSession(false));
+$('#new-session').addEventListener('click', () => startSession(true));
 $('#close-session').addEventListener('click', closeSession);
 $('#open-cookies').addEventListener('click', () => {
   $('#cookies-json').value = state.cookies;
@@ -228,6 +272,8 @@ $('#unlock-form').addEventListener('submit', async (event) => {
     $('#unlock-error').textContent = '';
     unlockDialog.close();
     setStatus('Ready');
+    await loadDefaultCookies();
+    await restoreSession();
   } catch (error) {
     $('#unlock-error').textContent = error.status === 401 ? 'That access key is not correct.' : error.message;
   }
@@ -243,7 +289,6 @@ $('#cookies-form').addEventListener('submit', async (event) => {
     const names = new Set(parsed.map((cookie) => cookie?.name));
     const missing = ['c_user', 'xs', 'datr', 'sb'].filter((name) => !names.has(name));
     if (missing.length) throw new Error(`Missing: ${missing.join(', ')}`);
-    if (state.session) await closeSession();
     state.cookies = JSON.stringify(parsed);
     localStorage.setItem('anchor-facebook-cookies', state.cookies);
     status.textContent = `${parsed.length} cookies saved on this device.`;
@@ -255,5 +300,25 @@ $('#cookies-form').addEventListener('submit', async (event) => {
   }
 });
 
-if (!state.accessKey) unlockDialog.showModal();
-else setStatus('Ready');
+async function boot() {
+  if (!state.accessKey) {
+    unlockDialog.showModal();
+    return;
+  }
+  setStatus('Ready');
+  try {
+    await loadDefaultCookies();
+    await restoreSession();
+  } catch (error) {
+    if (error.status === 401) {
+      sessionStorage.removeItem('anchor-access-key');
+      state.accessKey = '';
+      unlockDialog.showModal();
+    } else {
+      clearSessionView();
+      addMessage(error.message, 'assistant', true);
+    }
+  }
+}
+
+boot();

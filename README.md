@@ -25,6 +25,7 @@ Required production variables:
 
 - `ANCHOR_API_KEY`
 - `APP_ACCESS_KEY`
+- `FACEBOOK_COOKIES_JSON` (the default Cookie-Editor JSON loaded on a device that has not saved its own cookies yet)
 
 The repo-root `.env` is the canonical deployment configuration. Keep Coolify's
 runtime variables synchronized from it. Facebook cookies are entered inside the
