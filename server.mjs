@@ -13,7 +13,7 @@ const ANCHOR_API_KEY = String(process.env.ANCHOR_API_KEY || process.env.ANCHORBR
 const APP_ACCESS_KEY = String(process.env.APP_ACCESS_KEY || '').trim();
 const DEFAULT_FACEBOOK_COOKIES = String(process.env.FACEBOOK_COOKIES_JSON || '').trim();
 const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || '').trim();
-const GEMINI_MODEL = String(process.env.GEMINI_MODEL || 'gemini-3.6-flash').trim();
+const GEMINI_MODEL = String(process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite').trim();
 const ANCHOR_API = 'https://api.anchorbrowser.io/v1';
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta';
 const sessions = new Map();
@@ -275,7 +275,9 @@ function agentInstruction() {
     'A request to draft or improve text is conversation, not an action, unless the user explicitly asks you to publish or send it.',
     'Use recent conversation to resolve short follow-ups such as "do it".',
     'For mode "chat", set actionPrompt to an empty string.',
-    'For mode "action", reply briefly about what you are about to do and provide a self-contained actionPrompt for the browser.',
+    'For mode "action", reply briefly about what you are about to do and provide a self-contained plain-language actionPrompt for the browser.',
+    'The actionPrompt must include the complete requested outcome, including any publish, comment, send, or other visible change; never replace it with only a search step.',
+    'Never put JSON, function calls, tool syntax, or code in actionPrompt.',
     'Never claim that a Facebook action completed; the browser tool will report the observed result.',
     'Use the user\'s language and keep replies concise.',
   ].join(' ');
