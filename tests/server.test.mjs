@@ -3,21 +3,26 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
   classifyIntent,
-  canResolveWithFacebookContext,
   createApp,
   facebookContextForRequest,
   isAgentConversation,
   providerLiveViewUrl,
   recoverableLiveViewUrl,
   SESSION_USER,
-  sessionBelongsToKitty,
+  sessionBelongsToUser,
   sessionHistoryItem,
   shouldClarifyBeforeAction,
   toolInventoryDecision,
 } from '../server.mjs';
 
+const TEST_CONTEXT = {
+  version: 'test-runtime-config',
+  instructions: ['Use configured context and inspect the current Facebook account before acting.'],
+  priorities: ['Handle recent and relevant activity first.'],
+};
+
 test('classifies read-only Facebook requests without confirmation', () => {
-  assert.deepEqual(classifyIntent('Find recent posts asking for Chinese lessons'), {
+  assert.deepEqual(classifyIntent('Find recent posts that need attention'), {
     kind: 'read',
     needsConfirmation: false,
     summary: 'This request only reads or navigates Facebook.',
@@ -35,8 +40,9 @@ test('requires confirmation for visible Facebook writes in English and Spanish',
 test('conversational messages return an agent reply without creating a browser task', async () => {
   const calls = [];
   const server = createApp({
-    agentResponder: async (message, history) => {
-      calls.push({ message, history });
+    agentContext: TEST_CONTEXT,
+    agentResponder: async (message, history, context) => {
+      calls.push({ message, history, context });
       return { mode: 'chat', reply: 'Hello! How can I help?', actionPrompt: '' };
     },
   });
@@ -50,7 +56,9 @@ test('conversational messages return an agent reply without creating a browser t
   const payload = await response.json();
   assert.equal(response.status, 200);
   assert.deepEqual(payload, { ok: true, mode: 'chat', reply: 'Hello! How can I help?', actionPrompt: '' });
-  assert.deepEqual(calls, [{ message: 'hello', history: [] }]);
+  assert.equal(calls[0].message, 'hello');
+  assert.deepEqual(calls[0].history, []);
+  assert.match(calls[0].context, /test-runtime-config/);
   await new Promise((resolve) => server.close(resolve));
 });
 
@@ -81,37 +89,54 @@ test('agent-status questions remain conversational even if the model misroutes t
   await new Promise((resolve) => server.close(resolve));
 });
 
-test('saved Facebook context resolves a high-level story request without a generic question', async () => {
-  const decision = {
-    mode: 'action',
-    reply: "Tell me what you'd like to share and I can publish it.",
-    actionPrompt: 'Create a Facebook story containing the text or media the user provides.',
-  };
-  assert.equal(shouldClarifyBeforeAction(decision), true);
-  assert.equal(canResolveWithFacebookContext('publish a story'), true);
-  const context = facebookContextForRequest('publish a story');
-  assert.match(context, /Zimo Qiu/);
-  assert.match(context, /short-stay rooms in Usera/);
-  assert.match(context, /Chinese lessons/);
-  assert.match(context, /conflicting prices/i);
-  const server = createApp({ agentResponder: async () => decision });
+test('configured context reaches the agent without committed business rules', async () => {
+  const context = facebookContextForRequest('perform the requested action', TEST_CONTEXT);
+  assert.match(context, /test-runtime-config/);
+  assert.match(context, /current Facebook account/);
+  let receivedContext = '';
+  const server = createApp({
+    agentContext: TEST_CONTEXT,
+    agentResponder: async (_message, _history, runtimeContext) => {
+      receivedContext = runtimeContext;
+      return {
+        mode: 'action',
+        reply: 'I can handle that using the configured context and current account activity.',
+        actionPrompt: 'Inspect the current Facebook account and complete the requested action using suitable existing content.',
+      };
+    },
+  });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   const response = await fetch(`http://127.0.0.1:${address.port}/api/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-access-key': process.env.APP_ACCESS_KEY || '' },
-    body: JSON.stringify({ message: 'publish a story', history: [] }),
+    body: JSON.stringify({ message: 'perform the requested action', history: [] }),
   });
   const payload = await response.json();
   assert.equal(payload.mode, 'action');
-  assert.match(payload.actionPrompt, /most useful Facebook Story/i);
-  assert.match(payload.actionPrompt, /existing Facebook media|text story/i);
-  assert.doesNotMatch(payload.reply, /tell me what|what would you/i);
+  assert.match(receivedContext, /test-runtime-config/);
+  assert.match(payload.actionPrompt, /current Facebook account/i);
   await new Promise((resolve) => server.close(resolve));
 });
 
-test('context does not invent a recipient for an underspecified direct message', () => {
-  assert.equal(canResolveWithFacebookContext('send her a message'), false);
+test('an agent question remains conversational instead of starting a browser task', async () => {
+  const decision = {
+    mode: 'action',
+    reply: 'Which item should I use?',
+    actionPrompt: 'Act on the item once the user provides it.',
+  };
+  assert.equal(shouldClarifyBeforeAction(decision), true);
+  const server = createApp({ agentContext: TEST_CONTEXT, agentResponder: async () => decision });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-access-key': process.env.APP_ACCESS_KEY || '' },
+    body: JSON.stringify({ message: 'act on it', history: [] }),
+  });
+  const payload = await response.json();
+  assert.equal(payload.mode, 'chat');
+  assert.equal(payload.actionPrompt, '');
+  await new Promise((resolve) => server.close(resolve));
 });
 
 test('tool inventory follows a JSON formatting request from conversation context', () => {
@@ -156,27 +181,26 @@ test('only restores the matching Anchor live-view session URL', () => {
   assert.equal(recoverableLiveViewUrl('https://live.anchorbrowser.io/?sessionId=another-session', sessionId), false);
 });
 
-test('provider history is attributed to kittyfb and reconstructs running live links', () => {
+test('provider history is attributed to the configured user and reconstructs running live links', () => {
   const running = {
     id: '3b6caa44-f9d2-4690-b935-aa58db2101c2',
     status: 'running',
-    tags: ['anchorbrowser-from-anywhere', 'facebook', 'kittyfb'],
+    tags: ['anchorbrowser-from-anywhere', 'facebook', SESSION_USER],
     recording: true,
     created_at: '2026-08-02T20:16:31.240Z',
   };
-  assert.equal(SESSION_USER, 'kittyfb');
-  assert.equal(sessionBelongsToKitty(running), true);
-  assert.equal(sessionBelongsToKitty({ ...running, tags: ['other-app'] }), false);
+  assert.equal(sessionBelongsToUser(running), true);
+  assert.equal(sessionBelongsToUser({ ...running, tags: ['other-app'] }), false);
   const item = sessionHistoryItem(running);
-  assert.equal(item.user, 'kittyfb');
+  assert.equal(item.user, SESSION_USER);
   assert.equal(item.liveViewUrl, providerLiveViewUrl(running.id));
   assert.equal(item.taggedUser, true);
 });
 
 test('session history endpoint chooses the newest running app session without a database', async () => {
   const sessions = [
-    { id: 'new-live', status: 'running', tags: ['anchorbrowser-from-anywhere', 'facebook', 'kittyfb'], recording: true, created_at: '2026-08-02T20:20:00Z' },
-    { id: 'older-recording', status: 'completed', tags: ['anchorbrowser-from-anywhere', 'facebook'], recording: true, duration: 90, created_at: '2026-08-02T19:20:00Z' },
+    { id: 'new-live', status: 'running', tags: ['anchorbrowser-from-anywhere', 'facebook', SESSION_USER], recording: true, created_at: '2026-08-02T20:20:00Z' },
+    { id: 'older-recording', status: 'completed', tags: ['anchorbrowser-from-anywhere', 'facebook', SESSION_USER], recording: true, duration: 90, created_at: '2026-08-02T19:20:00Z' },
     { id: 'other-user', status: 'running', tags: ['another-app'], recording: true, created_at: '2026-08-02T21:20:00Z' },
   ];
   const server = createApp({ anchorRequest: async (path) => {
@@ -189,7 +213,7 @@ test('session history endpoint chooses the newest running app session without a 
   });
   const payload = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(payload.user, 'kittyfb');
+  assert.equal(payload.user, SESSION_USER);
   assert.equal(payload.idleMinutes, 15);
   assert.equal(payload.sessions.length, 2);
   assert.equal(payload.activeSession.sessionId, 'new-live');
@@ -199,7 +223,7 @@ test('session history endpoint chooses the newest running app session without a 
 test('recording endpoint exposes only a provider recording belonging to this app user', async () => {
   const server = createApp({ anchorRequest: async (path) => {
     if (path === '/sessions/recorded-session') {
-      return { session_id: 'recorded-session', status: 'completed', tags: ['anchorbrowser-from-anywhere', 'facebook', 'kittyfb'] };
+      return { session_id: 'recorded-session', status: 'completed', tags: ['anchorbrowser-from-anywhere', 'facebook', SESSION_USER] };
     }
     if (path === '/sessions/recorded-session/recordings') {
       return { items: [{ id: 'primary', is_primary: true, file_link: 'https://recordings.example/session.mp4', duration: '00:01:30' }] };
@@ -217,7 +241,7 @@ test('recording endpoint exposes only a provider recording belonging to this app
   await new Promise((resolve) => server.close(resolve));
 });
 
-test('new sessions are parallel, tagged kittyfb, recorded, and expire after inactivity', async () => {
+test('new sessions are parallel, tagged to the configured user, recorded, and expire after inactivity', async () => {
   const calls = [];
   const server = createApp({
     anchorRequest: async (path, options = {}) => {
@@ -245,7 +269,7 @@ test('new sessions are parallel, tagged kittyfb, recorded, and expire after inac
   assert.equal(payload.session.sessionId, 'parallel-session');
   assert.equal(calls.some((call) => call.options.method === 'DELETE'), false);
   const config = JSON.parse(calls[0].options.body);
-  assert.deepEqual(config.session.tags, ['anchorbrowser-from-anywhere', 'facebook', 'kittyfb']);
+  assert.deepEqual(config.session.tags, ['anchorbrowser-from-anywhere', 'facebook', SESSION_USER]);
   assert.deepEqual(config.session.timeout, { idle_timeout: 15, max_duration: 1440 });
   assert.deepEqual(config.session.recording, { active: true });
   await new Promise((resolve) => server.close(resolve));
@@ -256,7 +280,7 @@ test('active browser agent can be paused and resumed without ending its session'
   const server = createApp({ anchorRequest: async (path, options = {}) => {
     calls.push({ path, options });
     if (path === '/sessions/live-session') {
-      return { session_id: 'live-session', status: 'running', tags: ['anchorbrowser-from-anywhere', 'facebook', 'kittyfb'] };
+      return { session_id: 'live-session', status: 'running', tags: ['anchorbrowser-from-anywhere', 'facebook', SESSION_USER] };
     }
     if (path === '/sessions/live-session/agent/pause' && options.method === 'POST') return { status: 'paused' };
     if (path === '/sessions/live-session/agent/resume' && options.method === 'POST') return { status: 'running' };
@@ -336,7 +360,7 @@ test('mobile UI exposes chat, live browser, native full screen, reconnect, wake 
 });
 
 test('health exposes deployment identity without secrets', async () => {
-  const server = createApp();
+  const server = createApp({ agentContext: TEST_CONTEXT });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   const response = await fetch(`http://127.0.0.1:${address.port}/health`);
@@ -344,9 +368,28 @@ test('health exposes deployment identity without secrets', async () => {
   assert.equal(response.status, 200);
   assert.equal(payload.ok, true);
   assert.equal(payload.service, 'anchor-browser-from-anywhere');
-  assert.equal(payload.version, '1.7.0');
-  assert.equal(payload.agentContextVersion, '2026-08-03-zimo-export');
-  assert.equal(payload.sessionUser, 'kittyfb');
+  assert.equal(payload.version, '1.8.0');
+  assert.equal(payload.agentContextVersion, 'test-runtime-config');
+  assert.equal(payload.sessionUser, SESSION_USER);
   assert.equal('cookies' in payload, false);
   await new Promise((resolve) => server.close(resolve));
+});
+
+test('committed product sources contain no account, campaign, or contact defaults', async () => {
+  const source = await Promise.all([
+    readFile(new URL('../server.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../README.md', import.meta.url), 'utf8'),
+  ]).then((parts) => parts.join('\n'));
+  const forbiddenValues = [
+    ['Zimo', ' Qiu'],
+    ['Use', 'ra'],
+    ['642', '609', '188'],
+    ['Chinese', ' lessons'],
+    ['kitty', 'fb'],
+  ].map((parts) => parts.join(''));
+  for (const forbidden of forbiddenValues) {
+    assert.doesNotMatch(source, new RegExp(forbidden, 'i'));
+  }
 });

@@ -1,6 +1,5 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
@@ -15,22 +14,19 @@ const APP_ACCESS_KEY = String(process.env.APP_ACCESS_KEY || '').trim();
 const DEFAULT_FACEBOOK_COOKIES = String(process.env.FACEBOOK_COOKIES_JSON || '').trim();
 const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || '').trim();
 const GEMINI_MODEL = String(process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite').trim();
-const FACEBOOK_CONTEXT_PATH = String(process.env.FACEBOOK_AGENT_CONTEXT_PATH || join(ROOT, 'context', 'facebook-agent-context.json')).trim();
 const ANCHOR_API = 'https://api.anchorbrowser.io/v1';
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta';
 const sessions = new Map();
-export const SESSION_USER = 'kittyfb';
+export const SESSION_USER = String(process.env.SESSION_USER || 'facebook-agent').trim();
 const APP_SESSION_TAGS = ['anchorbrowser-from-anywhere', 'facebook'];
 const USER_SESSION_TAGS = [...APP_SESSION_TAGS, SESSION_USER];
 const SESSION_IDLE_MINUTES = 15;
 const SESSION_MAX_MINUTES = 1440;
 
-function loadFacebookAgentContext() {
-  const override = String(process.env.FACEBOOK_AGENT_CONTEXT || '').trim();
-  if (override) {
-    try { return JSON.parse(override); } catch { return { version: 'environment', freeform: override.slice(0, 20000) }; }
-  }
-  try { return JSON.parse(readFileSync(FACEBOOK_CONTEXT_PATH, 'utf8')); } catch { return { version: 'missing', operatingRules: [] }; }
+function loadFacebookAgentContext(raw = process.env.FACEBOOK_AGENT_CONTEXT) {
+  const configured = String(raw || '').trim();
+  if (!configured) return { version: 'unconfigured' };
+  try { return JSON.parse(configured); } catch { return { version: 'environment', freeform: configured.slice(0, 20000) }; }
 }
 
 const FACEBOOK_AGENT_CONTEXT = loadFacebookAgentContext();
@@ -103,62 +99,13 @@ export function shouldClarifyBeforeAction(decision) {
   return decision?.mode === 'action' && asksForMissingDetail(decision);
 }
 
-function matchesCampaign(message, campaign) {
-  const text = String(message || '').toLowerCase();
-  return campaign?.keywords?.some((keyword) => text.includes(String(keyword).toLowerCase()));
-}
-
-export function facebookContextForRequest(message) {
-  const context = FACEBOOK_AGENT_CONTEXT;
+export function facebookContextForRequest(message, context = FACEBOOK_AGENT_CONTEXT) {
   if (context.freeform) return String(context.freeform).slice(0, 20000);
-  const campaigns = context.campaigns || {};
-  const directMatches = Object.values(campaigns).filter((campaign) => matchesCampaign(message, campaign));
-  const broadContentAction = /\b(story|stories|historia|historias|post|publica|publish|comment|comenta|reply|responde|lead|notification|marketplace)\b/i.test(String(message || ''));
-  const selectedCampaigns = directMatches.length
-    ? directMatches
-    : (broadContentAction ? Object.values(campaigns) : []);
-  const campaignSummary = Object.values(campaigns).map((campaign) => ({ goal: campaign.goal, knownFacts: campaign.knownFacts }));
-  const relevantExamples = selectedCampaigns.map((campaign) => ({
-    goal: campaign.goal,
-    examples: campaign.examples,
-  }));
+  if (!context || Object.keys(context).length === 0 || context.version === 'unconfigured') return '';
   return [
     `Persistent Facebook context (${context.version || 'current'}):`,
-    JSON.stringify({
-      subject: context.subject,
-      sourceSummary: context.sourceSummary,
-      operatingRules: context.operatingRules,
-      priorities: context.priorities,
-      voice: context.voice,
-      campaigns: campaignSummary,
-      relevantExamples,
-      autonomousDefaults: context.autonomousDefaults,
-    }),
-  ].join('\n').slice(0, 16000);
-}
-
-export function canResolveWithFacebookContext(message) {
-  const text = String(message || '');
-  const explicitAction = /\b(post|publish|share|create|comment|reply|find|search|check|review|read|publica|publicar|comenta|comentar|responde|responder|busca|buscar|revisa|revisar|lee|leer)\b/i.test(text);
-  const resolvableTarget = /\b(story|stories|historia|historias|post|posts|feed|group|groups|grupo|grupos|comment|comments|comentario|comentarios|reply|replies|respuesta|respuestas|lead|leads|notification|notifications|notificacion|notificaciones|marketplace|inbox|bandeja)\b/i.test(text);
-  return explicitAction && resolvableTarget;
-}
-
-function contextualActionPrompt(message) {
-  const text = String(message || '').trim();
-  if (/\b(story|stories|historia|historias)\b/i.test(text)) {
-    return "Publish the most useful Facebook Story for Zimo Qiu's current campaign. Inspect the live account's recent posts, stories, messages, and engagement first; choose the highest-value active or overdue lane (Usera short-stay rooms or Chinese lessons); create concise natural Spanish copy in her established style; reuse suitable existing Facebook media if accessible or create a text story; omit any price, promotion, date, or availability that is not currently verified; and publish it.";
-  }
-  return `Complete this Facebook request autonomously using Zimo Qiu's saved context and the current live account: ${text} Inspect the visible target first, resolve details from current Facebook state, customize the result, and do not invent current prices, dates, availability, or recipients.`;
-}
-
-export function applyContextualAutonomy(message, decision) {
-  if (!canResolveWithFacebookContext(message) || !asksForMissingDetail(decision)) return decision;
-  return {
-    mode: 'action',
-    reply: "I have Zimo's Facebook history, campaigns, and writing style. I’ll inspect the current account, choose the most useful current content, and use suitable existing Facebook media or a text format without asking you to specify it again.",
-    actionPrompt: contextualActionPrompt(message),
-  };
+    JSON.stringify(context),
+  ].join('\n').slice(0, 20000);
 }
 
 function json(res, status, payload) {
@@ -305,9 +252,9 @@ function providerSessionTags(value) {
   return Array.isArray(tags) ? tags.map(String) : [];
 }
 
-export function sessionBelongsToKitty(value) {
+export function sessionBelongsToUser(value) {
   const tags = providerSessionTags(value);
-  return APP_SESSION_TAGS.every((tag) => tags.includes(tag));
+  return USER_SESSION_TAGS.every((tag) => tags.includes(tag));
 }
 
 export function sessionHistoryItem(value) {
@@ -325,16 +272,16 @@ export function sessionHistoryItem(value) {
   };
 }
 
-async function listKittySessions(anchorRequest = anchorFetch) {
+async function listUserSessions(anchorRequest = anchorFetch) {
   const query = new URLSearchParams({
     limit: '50',
     sort_by: 'created_at',
     sort_order: 'desc',
-    tags: APP_SESSION_TAGS.join(','),
+    tags: USER_SESSION_TAGS.join(','),
   });
   const payload = await anchorRequest(`/sessions?${query}`);
   const source = Array.isArray(payload?.sessions) ? payload.sessions : [];
-  return source.filter(sessionBelongsToKitty).map(sessionHistoryItem);
+  return source.filter(sessionBelongsToUser).map(sessionHistoryItem);
 }
 
 async function createFacebookSession(clientId, cookies, anchorRequest = anchorFetch, prepare = prepareFacebook) {
@@ -372,7 +319,7 @@ async function createFacebookSession(clientId, cookies, anchorRequest = anchorFe
 async function getOrCreateSession(clientId, cookies, storedSession, anchorRequest = anchorFetch, prepare = prepareFacebook) {
   const restored = await restoreFacebookSession(clientId, storedSession || {}, anchorRequest);
   if (restored) return restored;
-  const history = await listKittySessions(anchorRequest);
+  const history = await listUserSessions(anchorRequest);
   const latest = history.find((item) => item.status === 'running');
   if (latest) return restoreFacebookSession(clientId, latest, anchorRequest);
   return createFacebookSession(clientId, cookies, anchorRequest, prepare);
@@ -422,7 +369,7 @@ async function restoreFacebookSession(clientId, input, anchorRequest = anchorFet
     : providerLiveViewUrl(sessionId);
   try {
     const remote = await anchorRequest(`/sessions/${encodeURIComponent(sessionId)}`);
-    if (!sessionBelongsToKitty(remote) || String(remote.status || '').toLowerCase() !== 'running') return null;
+    if (!sessionBelongsToUser(remote) || String(remote.status || '').toLowerCase() !== 'running') return null;
     const current = sessions.get(sessionId);
     const record = {
       clientId,
@@ -466,7 +413,7 @@ function agentInstruction(context) {
     'The app handles required confirmation after your decision. Never tell the browser agent to request, invoke, or wait for another confirmation.',
     'Describe the complete outcome, not individual browser steps; the browser agent decides the navigation and tools needed autonomously.',
     'Use the persistent Facebook context and inspect the live account to resolve content, target, tone, priority, and existing-media choices whenever possible.',
-    'A clear high-level request such as "publish a story" is actionable: decide the best current story from context and live activity. Do not ask the user what photo, video, or text to use when existing Facebook media or a text story can complete it.',
+    'A clear high-level request with a complete outcome is actionable: resolve implementation details from configured context and current Facebook activity instead of asking the user to repeat information already available there.',
     'If an indispensable detail still truly prevents action after using context and live state, ask for it naturally in chat. Login, two-factor, CAPTCHA, or manual review can be completed by the user in the same live browser session.',
     'Whenever your reply asks the user for a missing detail, choose mode "chat" and leave actionPrompt empty. Never launch the browser while waiting for that answer.',
     'Obey requested output formats. If the user asks for JSON, return valid JSON text in reply and preserve the subject from recent conversation.',
@@ -529,7 +476,7 @@ async function converseWithGemini(message, history, context = facebookContextFor
   return parseAgentDecision(payload);
 }
 
-function executionPrompt(prompt, isWrite, history = []) {
+function executionPrompt(prompt, isWrite, history = [], context = FACEBOOK_AGENT_CONTEXT) {
   const conversation = cleanHistory(history)
     .map((item) => `${item.role === 'assistant' ? 'Agent' : 'User'}: ${item.text}`)
     .join('\n');
@@ -537,7 +484,7 @@ function executionPrompt(prompt, isWrite, history = []) {
     'Work only inside the current Facebook browser session.',
     'Act autonomously: navigate, search, scroll, inspect, and use the browser tools needed to complete the full request without asking for step-by-step permission.',
     conversation ? `Recent conversation for context:\n${conversation}` : '',
-    facebookContextForRequest(prompt),
+    facebookContextForRequest(prompt, context),
     `User request: ${prompt}`,
     isWrite
       ? 'The user reviewed and explicitly confirmed this exact external action. Execute only that action without requesting or invoking another confirmation.'
@@ -547,13 +494,13 @@ function executionPrompt(prompt, isWrite, history = []) {
   ].filter(Boolean).join('\n');
 }
 
-async function runTask(session, prompt, history, anchorRequest = anchorFetch) {
+async function runTask(session, prompt, history, context, anchorRequest = anchorFetch) {
   const intent = classifyIntent(prompt);
   const url = `/tools/perform-web-task?sessionId=${encodeURIComponent(session.sessionId)}`;
   const result = await anchorRequest(url, {
     method: 'POST',
     body: JSON.stringify({
-      prompt: executionPrompt(prompt, intent.needsConfirmation, history),
+      prompt: executionPrompt(prompt, intent.needsConfirmation, history, context),
       agent: 'browser-use',
       max_steps: 120,
       detect_elements: true,
@@ -585,12 +532,12 @@ async function serveStatic(url, res) {
   }
 }
 
-export function createApp({ agentResponder = converseWithGemini, anchorRequest = anchorFetch, prepareFacebookSession = prepareFacebook } = {}) {
+export function createApp({ agentResponder = converseWithGemini, agentContext = FACEBOOK_AGENT_CONTEXT, anchorRequest = anchorFetch, prepareFacebookSession = prepareFacebook } = {}) {
   return createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     try {
       if (url.pathname === '/health') {
-        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), agentConfigured: Boolean(GEMINI_API_KEY), agentContextVersion: FACEBOOK_AGENT_CONTEXT.version || 'environment', sessionUser: SESSION_USER, version: '1.7.0' });
+        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), agentConfigured: Boolean(GEMINI_API_KEY), agentContextVersion: agentContext.version || 'environment', sessionUser: SESSION_USER, version: '1.8.0' });
       }
       if (url.pathname.startsWith('/api/') && !authorized(req)) return json(res, 401, { ok: false, error: 'Access key required.' });
 
@@ -599,7 +546,7 @@ export function createApp({ agentResponder = converseWithGemini, anchorRequest =
       }
 
       if (req.method === 'GET' && url.pathname === '/api/sessions') {
-        const history = await listKittySessions(anchorRequest);
+        const history = await listUserSessions(anchorRequest);
         const running = history.filter((item) => item.status === 'running');
         return json(res, 200, {
           ok: true,
@@ -616,7 +563,7 @@ export function createApp({ agentResponder = converseWithGemini, anchorRequest =
       if (recordingMatch) {
         const sessionId = decodeURIComponent(recordingMatch[1]);
         const remote = await anchorRequest(`/sessions/${encodeURIComponent(sessionId)}`);
-        if (!sessionBelongsToKitty(remote)) return json(res, 404, { ok: false, error: 'Session not found.' });
+        if (!sessionBelongsToUser(remote)) return json(res, 404, { ok: false, error: 'Session not found.' });
         const recordings = await anchorRequest(`/sessions/${encodeURIComponent(sessionId)}/recordings`);
         const items = Array.isArray(recordings?.items) ? recordings.items : [];
         const recording = items.find((item) => item?.is_primary) || items[0];
@@ -680,7 +627,7 @@ export function createApp({ agentResponder = converseWithGemini, anchorRequest =
         const input = await bodyJson(req);
         const message = String(input.message || '').trim();
         if (!message) return json(res, 400, { ok: false, error: 'Write a message first.' });
-        const requestContext = facebookContextForRequest(message);
+        const requestContext = facebookContextForRequest(message, agentContext);
         let decision = toolInventoryDecision(message, input.history)
           || await agentResponder(message.slice(0, 4000), input.history, requestContext);
         if (isAgentConversation(message)) {
@@ -688,8 +635,6 @@ export function createApp({ agentResponder = converseWithGemini, anchorRequest =
           decision.actionPrompt = '';
           const activePrompt = String(input.activeWorkflow?.prompt || '').trim();
           if (activePrompt) decision.reply = `I’m currently working on this in the same browser session: ${activePrompt}`;
-        } else if (canResolveWithFacebookContext(message) && asksForMissingDetail(decision)) {
-          decision = applyContextualAutonomy(message, decision);
         } else if (shouldClarifyBeforeAction(decision)) {
           decision = { ...decision, mode: 'chat', actionPrompt: '' };
         }
@@ -704,7 +649,7 @@ export function createApp({ agentResponder = converseWithGemini, anchorRequest =
         if (!prompt || !clientId) return json(res, 400, { ok: false, error: 'Missing request or browser session.' });
         if (intent.needsConfirmation && input.confirmed !== true) return json(res, 409, { ok: false, needsConfirmation: true, prompt, ...intent });
         const session = await getOrCreateSession(clientId, input.cookies, input.session, anchorRequest, prepareFacebookSession);
-        const task = await runTask(session, prompt, input.history, anchorRequest);
+        const task = await runTask(session, prompt, input.history, agentContext, anchorRequest);
         return json(res, 200, { ok: true, task, session: { sessionId: session.sessionId, liveViewUrl: session.liveViewUrl, authenticated: session.authenticated } });
       }
 

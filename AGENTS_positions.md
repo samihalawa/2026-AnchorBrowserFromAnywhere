@@ -1,7 +1,8 @@
 INDEX
-2026-08-03 | context-grounded broad Facebook actions | demoting underspecified content actions to chat ignores the attached Facebook history and creates repetitive questions | do inject the compact export-derived context into dialogue and execution, inspect live state, and autonomously resolve stories/posts/comments while retaining the app confirmation | don't require the user to restate content already inferable from history or Facebook | verify `publish a story` returns a concrete action without a question, confirmation appears, execution receives the context, and ordinary chat stays chat
+2026-08-03 | configuration-only identity and business context | committed persona/campaign defaults make the agent brittle and leak one account into product behavior | do load session identity and agent context only from the ignored repo-root `.env`, then inspect live Facebook | don't commit account, campaign, contact, or action-specific fallbacks | verify a forbidden-string source sweep, runtime context version, configured session restoration, broad-action chat response, and confirmation
+2026-08-03 | SUPERSEDED context-grounded broad Facebook actions | demoting underspecified content actions to chat can create repetitive questions, but committed export-derived defaults were the wrong layer | do use runtime-configured context plus live state while retaining confirmation | don't add Story-specific or campaign-specific source fallbacks | verify the configured context reaches dialogue/execution and ordinary chat stays chat
 2026-08-03 | smartphone live-view affordances | listing iframe permissions or opening another tab does not make a 1280px remote browser comfortable on a phone | do activate in-app full screen, exact-URL reconnect, safe-area controls, and wake lock while preserving the provider session | don't create a second mobile browser route or change the shared remote viewport | verify 390px fullscreen fills the viewport, reconnect retains the exact session ID, reload restores it, and desktop keeps its existing toolbar
-2026-08-02 | provider-backed kittyfb history | client-only continuity cannot recover across devices and forbidding parallel sessions was too narrow | do tag sessions kittyfb, discover/replay them from Anchor, keep one primary view, and tuck parallel/history controls into a submenu | don't add a database or expose a permanent session-manager layout | verify a new device autoloads the newest active session, reload preserves selection, recordings play, parallel creation preserves the old session, and inactivity closes sessions
+2026-08-02 | provider-backed configured-user history | client-only continuity cannot recover across devices and forbidding parallel sessions was too narrow | do tag sessions with `SESSION_USER`, discover/replay them from Anchor, keep one primary view, and tuck parallel/history controls into a submenu | don't add a database or expose a permanent session-manager layout | verify a new device autoloads the newest active session, reload preserves selection, recordings play, parallel creation preserves the old session, and inactivity closes sessions
 2026-08-02 | SUPERSEDED clarification-only routing and reload continuity | forcing every underspecified content action to chat was too narrow once persistent Facebook context became available | do retain full reload persistence but resolve broad actions from saved context plus live state before asking | don't launch Anchor for a truly indispensable missing recipient or value | verify context-resolvable actions reach confirmation while genuinely unresolvable requests stay chat, and reload still restores all UI/session state
 2026-08-02 | SUPERSEDED persistent single-session restriction | the continuity lesson remains, but rejecting parallel sessions conflicts with the corrected product | do keep one primary UI while allowing tagged parallel sessions under History | don't replace the main view with a visible session manager | verify chat/workflow continuity plus provider-backed parallel discovery
 2026-08-02 | conversational agent routing | sending every chat turn directly to Anchor makes greetings create browser tasks | do route every turn through conversational AI and invoke Anchor only for an explicit Facebook action | don't treat every non-write message as a read-only browser command | verify hello returns a chat reply with no workflow, a follow-up preserves context, and an explicit write reaches confirmation
@@ -13,10 +14,21 @@ INDEX
 ## 2026-08-03 | CURRENT
 
 - project/root: `/Users/samihalawa/git/PROJECTS_CODING/2026-AnchorBrowserFromAnywhere`
+- surface/workflow: agent identity, business context, broad Facebook actions, and provider session attribution
+- mistaken approach: committing one account's export-derived context, campaign facts, contact details, session tag, and action-specific fallback behavior into product source
+- superior approach: source `SESSION_USER` and `FACEBOOK_AGENT_CONTEXT` only from the ignored canonical `.env`; keep committed UI and server behavior generic; inspect current Facebook before acting
+- evidence: direct user correction `remove all hardcoded`; source sweep identified committed context JSON, server fallback rules, campaign shortcuts, documentation, tests, and fixed history labels
+- trigger terms: `hardcoded`, `context`, `persona`, `campaign`, `contact`, `session user`, `publish a story`
+- do: configure privately and pass the runtime context to dialogue/execution; don't: commit business facts or special-case a requested action
+- required verification: committed-source forbidden-string sweep, tests, `/health` reports configured context/user, session history restores the configured user's provider session, and live broad-action chat reaches the normal confirmation path
+
+## 2026-08-03 | SUPERSEDED
+
+- project/root: `/Users/samihalawa/git/PROJECTS_CODING/2026-AnchorBrowserFromAnywhere`
 - surface/workflow: conversational routing and Anchor execution for broad Facebook actions
-- mistaken approach: treating `publish a story` as incomplete and asking for media/text even though the official Zimo export and live Facebook account contain campaign history and reusable media
-- superior approach: inject a compact export-derived context into both decision and execution, inspect current Facebook activity, and choose content autonomously while preserving the app's real-write confirmation
-- evidence: user correction; export profile `61579001435313`; importer totals 20,469 text, 4,349 message, and 2,266 Marketplace rows; production `1.6.0` reproduced the generic question with empty history
+- mistaken approach: treating a broad content action as incomplete, then correcting it by committing one account's export-derived context and action-specific fallback behavior
+- superior approach: inject privately configured runtime context into both decision and execution, inspect current Facebook activity, and choose content autonomously while preserving the app's real-write confirmation
+- evidence: user corrections plus production dialogue evidence; the later correction explicitly rejected all hardcoded product context
 - trigger terms: `publish a story`, `what would you like`, `all context`, `massive prompt`, `should know`, `ask again`
 - do: resolve posts/stories/comments/reviews from context plus live state; don't: reuse stale prices or invent a recipient when live state cannot identify one
 - required verification: direct production chat returns a concrete action without a question, the confirmation remains, execution receives context, and ordinary conversation creates no workflow
@@ -37,9 +49,9 @@ INDEX
 - project/root: `/Users/samihalawa/git/PROJECTS_CODING/2026-AnchorBrowserFromAnywhere`
 - surface/workflow: provider-backed session attribution, autoload, parallel sessions, hidden history, recording replay, and inactivity cleanup
 - mistaken approach: relying on one device's stored live URL and forbidding concurrent sessions, which prevents cross-device discovery and misses Anchor recordings
-- superior approach: tag every new session `kittyfb`, query Anchor history directly, keep the chosen/newest running session primary, and place parallel/replay controls only inside History
+- superior approach: tag every new session with the configured `SESSION_USER`, query Anchor history directly, keep the chosen/newest running session primary, and place parallel/replay controls only inside History
 - evidence: live Anchor list returned 24 app-tagged sessions including one running session and recording metadata; official API supports descending tag filters and recording URLs; user explicitly corrected the single-session restriction
-- trigger terms: `kittyfb`, `last session`, `ongoing`, `parallel`, `history`, `replay`, `no database`, `not a session manager`, `inactive`
+- trigger terms: `session user`, `last session`, `ongoing`, `parallel`, `history`, `replay`, `no database`, `not a session manager`, `inactive`
 - do: use Anchor as durable session truth with one primary browser; don't: add DB state, surface all sessions permanently, or replace an active session when creating another
 - required verification: new sessions carry all three tags and 15-minute idle timeout, a fresh browser autoloads the active provider session, History is closed by default, replay works, parallel creation preserves the original running ID, and 30-minute inactive primary cleanup is wired
 
@@ -115,7 +127,7 @@ INDEX
 - surface/workflow: Facebook cookie injection and Anchor session authentication
 - mistaken approach to avoid: treating `cookiesApplied` or `facebook.com/` as proof that Facebook is logged in
 - superior approach: inject the user-pasted Cookie-Editor array before navigation, warm the page, inspect the visible page, and leave the embedded live view interactive when login or 2FA remains
-- evidence: local session `4e22e48d-aafa-4ea2-a43c-bba4c697c2de` applied 11 cookies; workflow `83550` visibly reported Facebook's saved-profile login chooser for Zimo Qiu and Sami Halawa Ribas
+- evidence: a local session applied 11 cookies yet visibly reported Facebook's saved-profile login chooser instead of an authenticated feed
 - trigger terms: `cookies saved`, `authenticated`, `profile chooser`, `login needed`, `2FA`
 - do: report the observed auth state; don't: infer authentication from cookie presence
 - required verification: current visible feed/group/inbox content or an agent report from that authenticated surface

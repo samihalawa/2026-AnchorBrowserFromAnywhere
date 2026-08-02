@@ -402,7 +402,7 @@ function renderSessionHistory() {
 async function loadSessionHistory(autoload = false) {
   const payload = await api('/api/sessions');
   state.sessionHistory = Array.isArray(payload.sessions) ? payload.sessions : [];
-  $('#history-user').textContent = payload.user || 'kittyfb';
+  $('#history-user').textContent = payload.user || 'Facebook agent';
   $('#history-note').textContent = `Saved by Anchor · hidden sessions stop after ${payload.idleMinutes || 15} minutes disconnected.`;
   renderSessionHistory();
   if (!autoload || state.session) return payload;
@@ -695,8 +695,8 @@ async function handleCommand(prompt) {
   }
   if (command === '/session') {
     addMessage(state.session
-      ? 'The agent is using the current primary kittyfb session. Use /browser to interact with it; /new creates a parallel cookie-backed session and older sessions stay under History.'
-      : 'No browser is running yet. I’ll restore the newest active kittyfb session from Anchor, or create one with the saved cookies.');
+      ? 'The agent is using the current primary session. Use /browser to interact with it; /new creates a parallel cookie-backed session and older sessions stay under History.'
+      : 'No browser is running yet. I’ll restore the newest active session from Anchor, or create one with the saved cookies.');
     return true;
   }
   addMessage('Unknown command. Use /browser, /chat, /cookies, /new, or /session.');
