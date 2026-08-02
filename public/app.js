@@ -25,6 +25,9 @@ const state = {
   draft: localStorage.getItem('anchor-chat-draft') || '',
   sessionHistory: [],
   replay: null,
+  historyExpanded: false,
+  taskPaused: Boolean(readStoredJSON('anchor-active-workflow', null)?.paused),
+  browserShare: Math.min(75, Math.max(45, Number(localStorage.getItem('anchor-browser-share') || 65))),
 };
 if (!Array.isArray(state.history)) state.history = [];
 if (!Array.isArray(state.actionQueue)) state.actionQueue = [];
@@ -60,18 +63,52 @@ function savePendingPrompt(prompt = '') {
 function saveWorkflow(workflow) {
   state.workflow = workflow;
   state.workflowId = workflow?.workflowId || null;
+  state.taskPaused = Boolean(workflow?.paused);
   if (workflow) localStorage.setItem('anchor-active-workflow', JSON.stringify(workflow));
   else localStorage.removeItem('anchor-active-workflow');
   $('#close-session').disabled = Boolean(workflow);
+  updateTaskControls();
   if (workflow) clearTimeout(idleCloseTimer);
   else armIdleClose();
 }
 
 function setStatus(label, mode = '') {
-  connection.className = `connection ${mode}`.trim();
+  const normalized = String(label).toLowerCase();
+  const resolvedMode = mode
+    || (/replay/.test(normalized) ? 'replay'
+      : (/failed|could not|error/.test(normalized) ? 'error'
+        : (/waiting|input needed|paused/.test(normalized) ? 'attention'
+          : (/working|thinking|starting|loading|restoring/.test(normalized) ? 'busy'
+            : (/live/.test(normalized) ? 'live' : '')))));
+  connection.className = `connection ${resolvedMode}`.trim();
   connection.querySelector('b').textContent = label;
   connection.title = label;
   connection.setAttribute('aria-label', label);
+}
+
+function updateTaskControls() {
+  const control = $('#stop-task');
+  control.hidden = !state.workflowId;
+  control.textContent = state.taskPaused ? 'Resume task' : 'Stop task';
+  control.setAttribute('aria-label', state.taskPaused ? 'Resume browser task' : 'Stop browser task');
+}
+
+function setStageLoading(visible, label = 'Opening your browser…') {
+  $('#stage-loading-label').textContent = label;
+  $('#stage-loading').hidden = !visible;
+}
+
+function setBrowserShare(value) {
+  state.browserShare = Math.min(75, Math.max(45, Number(value) || 65));
+  localStorage.setItem('anchor-browser-share', String(state.browserShare));
+  $('#workspace').style.setProperty('--browser-fr', `${state.browserShare}fr`);
+  $('#workspace').style.setProperty('--chat-fr', `${100 - state.browserShare}fr`);
+  $('#workspace-resizer').setAttribute('aria-valuenow', String(Math.round(state.browserShare)));
+}
+
+function resizeComposer() {
+  promptInput.style.height = 'auto';
+  promptInput.style.height = `${Math.min(promptInput.scrollHeight, 160)}px`;
 }
 
 function addMessage(text, role = 'assistant', error = false, track = true) {
@@ -166,12 +203,13 @@ function clearSessionView() {
   localStorage.removeItem('anchor-active-session');
   liveBrowser.src = 'about:blank';
   $('#open-live').href = '#';
-  $('#open-live').textContent = 'Open full screen';
+  $('#open-live').innerHTML = 'Full screen <span aria-hidden="true">↗</span>';
   $('#open-live').hidden = true;
   liveBrowser.hidden = true;
   browserEmpty.hidden = false;
   $('#close-session').hidden = true;
   $('#session-state').textContent = 'Session off';
+  setStageLoading(false);
   setStatus('Ready');
 }
 
@@ -180,9 +218,12 @@ function showSession(session, restored = false) {
   state.session = session;
   state.storedSession = session;
   localStorage.setItem('anchor-active-session', JSON.stringify(session));
-  liveBrowser.src = session.liveViewUrl;
+  if (liveBrowser.src !== session.liveViewUrl) {
+    setStageLoading(true, restored ? 'Restoring your browser…' : 'Opening your browser…');
+    liveBrowser.src = session.liveViewUrl;
+  } else setStageLoading(false);
   $('#open-live').href = session.liveViewUrl;
-  $('#open-live').textContent = 'Open full screen';
+  $('#open-live').innerHTML = 'Full screen <span aria-hidden="true">↗</span>';
   $('#open-live').hidden = false;
   liveBrowser.hidden = false;
   browserEmpty.hidden = true;
@@ -212,6 +253,7 @@ function formatDuration(seconds) {
 
 function renderSessionHistory() {
   const list = $('#session-history-list');
+  const toggle = $('#history-toggle-list');
   list.replaceChildren();
   $('#history-count').textContent = String(state.sessionHistory.length);
   if (!state.sessionHistory.length) {
@@ -219,21 +261,34 @@ function renderSessionHistory() {
     empty.className = 'history-empty';
     empty.textContent = 'No Anchor sessions yet.';
     list.append(empty);
+    toggle.hidden = true;
     return;
   }
-  for (const session of state.sessionHistory) {
+  const sorted = [...state.sessionHistory].sort((a, b) => {
+    const aCurrent = a.sessionId === state.session?.sessionId ? 1 : 0;
+    const bCurrent = b.sessionId === state.session?.sessionId ? 1 : 0;
+    return bCurrent - aCurrent || Number(b.createdAt || 0) - Number(a.createdAt || 0);
+  });
+  const visibleSessions = state.historyExpanded ? sorted : sorted.slice(0, 5);
+  toggle.hidden = sorted.length <= 5;
+  toggle.textContent = state.historyExpanded ? 'Show recent only' : `View all ${sorted.length} sessions`;
+  for (const session of visibleSessions) {
     const row = document.createElement('div');
     row.className = 'history-item';
-    if (session.sessionId === state.session?.sessionId) row.classList.add('current');
+    const isCurrent = session.sessionId === state.session?.sessionId;
+    if (isCurrent) row.classList.add('current');
     const copy = document.createElement('div');
     const title = document.createElement('strong');
     title.textContent = formatSessionDate(session.createdAt);
     const detail = document.createElement('small');
     const duration = formatDuration(session.duration);
     detail.textContent = session.status === 'running'
-      ? (session.sessionId === state.session?.sessionId ? 'Live now · current' : 'Live now')
+      ? 'Live now'
       : `Recorded${duration ? ` · ${duration}` : ''}`;
-    copy.append(title, detail);
+    const badge = document.createElement('span');
+    badge.className = 'history-badge';
+    badge.textContent = isCurrent ? 'Current' : (session.status === 'running' ? 'Live' : (session.recordingAvailable ? 'Recording' : 'Ended'));
+    copy.append(title, detail, badge);
     const action = document.createElement('button');
     action.type = 'button';
     action.className = 'history-open';
@@ -246,6 +301,7 @@ function renderSessionHistory() {
         $('#session-history').open = false;
         setMobileView('browser');
       } catch (error) {
+        setStageLoading(false);
         addMessage(error.message, 'assistant', true);
       } finally {
         action.disabled = false;
@@ -275,6 +331,7 @@ async function loadSessionHistory(autoload = false) {
 
 async function showReplay(session) {
   setStatus('Loading replay…', 'busy');
+  setStageLoading(true, 'Loading session replay…');
   const payload = await api(`/api/sessions/${encodeURIComponent(session.sessionId)}/recording`);
   clearReplay();
   state.replay = session;
@@ -283,7 +340,7 @@ async function showReplay(session) {
   sessionReplay.src = payload.recording.url;
   sessionReplay.hidden = false;
   $('#open-live').href = payload.recording.url;
-  $('#open-live').textContent = 'Open recording';
+  $('#open-live').innerHTML = 'Open recording <span aria-hidden="true">↗</span>';
   $('#open-live').hidden = false;
   $('#return-live').hidden = false;
   $('#session-state').textContent = `Replay · ${formatSessionDate(session.createdAt)}`;
@@ -303,11 +360,13 @@ async function loadDefaultCookies() {
 
 async function restoreSession(candidate = state.storedSession) {
   if (!candidate?.sessionId) return null;
+  setStageLoading(true, 'Restoring your browser…');
   const payload = await api('/api/session/restore', {
     method: 'POST',
     body: JSON.stringify({ clientId: state.clientId, session: candidate }),
   });
   if (!payload.session) {
+    setStageLoading(false);
     if (candidate.sessionId === state.storedSession?.sessionId) clearSessionView();
     return null;
   }
@@ -323,6 +382,7 @@ async function startSession(forceNew = false) {
     throw new Error('Paste your Facebook cookies before starting a session.');
   }
   setStatus('Starting…', 'busy');
+  setStageLoading(true, forceNew ? 'Creating a parallel browser…' : 'Creating your browser…');
   $('#start-session').disabled = true;
   $('#new-session').disabled = true;
   try {
@@ -332,6 +392,7 @@ async function startSession(forceNew = false) {
       body: JSON.stringify({ clientId: state.clientId, cookies: state.cookies, forceNew, session: state.storedSession }),
     });
     if (!keepCurrent) showSession(payload.session);
+    else setStageLoading(false);
     await loadSessionHistory(false);
     addMessage(keepCurrent
       ? 'A parallel browser session was created and saved in History. The current working session stays in the main view until its task finishes.'
@@ -340,6 +401,7 @@ async function startSession(forceNew = false) {
         : 'The browser is live with your saved cookies and persistent Anchor profile. If Facebook asks, finish login or two-factor verification in the live view.'));
     return keepCurrent ? state.session : payload.session;
   } catch (error) {
+    setStageLoading(false);
     setStatus('Could not start');
     addMessage(error.message, 'assistant', true);
     throw error;
@@ -389,6 +451,11 @@ function readTaskResult(statusPayload) {
 
 async function pollTask(workflowId, bubble) {
   for (let attempt = 0; attempt < 150; attempt += 1) {
+    while (state.taskPaused && state.workflowId === workflowId) {
+      setStatus('Task paused');
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    if (state.workflowId !== workflowId) return;
     await new Promise((resolve) => setTimeout(resolve, 2000));
     const payload = await api(`/api/task/${encodeURIComponent(workflowId)}`);
     const task = readTaskResult(payload.status);
@@ -419,6 +486,28 @@ async function pollTask(workflowId, bubble) {
   }
   bubble.textContent = 'The task is still running in the live browser.';
   setStatus('Still working', 'busy');
+}
+
+async function toggleTaskPause() {
+  if (!state.workflowId || !state.session) return;
+  const button = $('#stop-task');
+  const action = state.taskPaused ? 'resume' : 'pause';
+  button.disabled = true;
+  try {
+    await api('/api/session/agent', {
+      method: 'POST',
+      body: JSON.stringify({ clientId: state.clientId, session: state.session, action }),
+    });
+    saveWorkflow({ ...state.workflow, paused: action === 'pause' });
+    setStatus(action === 'pause' ? 'Task paused' : 'Working…', action === 'pause' ? 'attention' : 'busy');
+    addMessage(action === 'pause'
+      ? 'The browser task is stopped for now. The live session stays open; press Resume task when you want it to continue.'
+      : 'The browser task is continuing in the same live session.', 'assistant');
+  } catch (error) {
+    addMessage(error.message, 'assistant', true);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function runNextAction() {
@@ -549,6 +638,7 @@ promptInput.addEventListener('input', () => {
   state.draft = promptInput.value;
   if (state.draft) localStorage.setItem('anchor-chat-draft', state.draft);
   else localStorage.removeItem('anchor-chat-draft');
+  resizeComposer();
 });
 
 document.querySelectorAll('[data-prompt]').forEach((button) => {
@@ -574,11 +664,23 @@ document.querySelectorAll('[data-mobile-view]').forEach((button) => {
 $('#start-session').addEventListener('click', () => startSession(false));
 $('#new-session').addEventListener('click', () => startSession(true));
 $('#close-session').addEventListener('click', () => closeSession('manual'));
+$('#stop-task').addEventListener('click', toggleTaskPause);
+$('#history-toggle-list').addEventListener('click', () => {
+  state.historyExpanded = !state.historyExpanded;
+  renderSessionHistory();
+});
+$('#quick-actions-more').addEventListener('click', () => {
+  const shell = document.querySelector('.quick-actions-shell');
+  const expanded = shell.classList.toggle('expanded');
+  $('#quick-actions-more').textContent = expanded ? 'Less ↑' : 'More →';
+  $('#quick-actions-more').setAttribute('aria-expanded', String(expanded));
+});
 $('#return-live').addEventListener('click', () => {
   if (state.session) showSession(state.session, true);
   else clearSessionView();
 });
 $('#session-history').addEventListener('toggle', (event) => {
+  if (!event.currentTarget.open) state.historyExpanded = false;
   if (event.currentTarget.open && state.accessKey) void loadSessionHistory(false).catch((error) => addMessage(error.message, 'assistant', true));
 });
 $('#open-cookies').addEventListener('click', () => {
@@ -589,6 +691,37 @@ $('#open-cookies').addEventListener('click', () => {
 });
 $('#toggle-browser').addEventListener('click', (event) => {
   setBrowserCollapsed(!state.browserCollapsed);
+});
+
+liveBrowser.addEventListener('load', () => {
+  if (liveBrowser.src && liveBrowser.src !== 'about:blank') setStageLoading(false);
+});
+sessionReplay.addEventListener('loadeddata', () => setStageLoading(false));
+sessionReplay.addEventListener('error', () => setStageLoading(false));
+
+const workspaceResizer = $('#workspace-resizer');
+workspaceResizer.addEventListener('pointerdown', (event) => {
+  if (window.innerWidth < 768) return;
+  workspaceResizer.classList.add('dragging');
+  workspaceResizer.setPointerCapture(event.pointerId);
+});
+workspaceResizer.addEventListener('pointermove', (event) => {
+  if (!workspaceResizer.hasPointerCapture(event.pointerId)) return;
+  const bounds = $('#workspace').getBoundingClientRect();
+  setBrowserShare(((event.clientX - bounds.left) / bounds.width) * 100);
+});
+workspaceResizer.addEventListener('pointerup', (event) => {
+  workspaceResizer.classList.remove('dragging');
+  if (workspaceResizer.hasPointerCapture(event.pointerId)) workspaceResizer.releasePointerCapture(event.pointerId);
+});
+workspaceResizer.addEventListener('pointercancel', (event) => {
+  workspaceResizer.classList.remove('dragging');
+  if (workspaceResizer.hasPointerCapture(event.pointerId)) workspaceResizer.releasePointerCapture(event.pointerId);
+});
+workspaceResizer.addEventListener('keydown', (event) => {
+  if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+  event.preventDefault();
+  setBrowserShare(state.browserShare + (event.key === 'ArrowRight' ? 3 : -3));
 });
 
 $('#confirm-run').addEventListener('click', () => {
@@ -644,6 +777,8 @@ $('#cookies-form').addEventListener('submit', async (event) => {
 
 async function boot() {
   promptInput.value = state.draft;
+  resizeComposer();
+  setBrowserShare(state.browserShare);
   setMobileView(state.mobileView);
   setBrowserCollapsed(state.browserCollapsed);
   renderStoredHistory();

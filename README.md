@@ -13,12 +13,16 @@ Production: https://anchorbrowser.megawebs.com
 - Stops hidden disconnected sessions after 15 minutes and the visible session after 30 minutes of in-app inactivity when no task is running.
 - Accepts natural-language tasks from a chat-style interface.
 - Keeps chat history, drafts, pending confirmations, selected workspace view, the active workflow, queued actions, and the exact Anchor iframe session across refreshes and deployments.
+- Restores the primary browser and chat in place after reload, with a clear live/busy/attention status and a loading state while Anchor reconnects.
+- Keeps the conversation composer large and reachable on phones, collapses secondary shortcuts behind `More`, and exposes the live browser as a dedicated mobile view.
+- Lets desktop users resize the browser/chat split and remembers their preferred width on that device.
+- Lets an active browser task be paused and resumed without ending its persistent Anchor session.
 - Lets the Anchor `browser-use` agent autonomously navigate and complete multi-step Facebook requests in that same session.
 - Runs read-only requests immediately.
 - Requires a second explicit confirmation before posts, comments, messages, reactions, joins, edits, or deletes.
 - Lets the user paste Cookie-Editor JSON once and saves it in that device's local storage.
 - Sends the cookie JSON only when creating/running that user's session, then injects it before Facebook opens.
-- Provides mobile Agent/Live Browser views, a full-screen live-view handoff, recording playback, and `/browser`, `/cookies`, `/new`, `/chat`, and `/session` commands. `/new` creates a parallel session without ending the current one.
+- Provides mobile Agent/Live Browser views, a prominent full-screen live-view handoff, compact hidden history with current/recording badges, recording playback, and `/browser`, `/cookies`, `/new`, `/chat`, and `/session` commands. `/new` creates a parallel session without ending the current one.
 
 ## Run locally
 

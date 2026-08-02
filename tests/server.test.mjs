@@ -238,6 +238,40 @@ test('new sessions are parallel, tagged kittyfb, recorded, and expire after inac
   await new Promise((resolve) => server.close(resolve));
 });
 
+test('active browser agent can be paused and resumed without ending its session', async () => {
+  const calls = [];
+  const server = createApp({ anchorRequest: async (path, options = {}) => {
+    calls.push({ path, options });
+    if (path === '/sessions/live-session') {
+      return { session_id: 'live-session', status: 'running', tags: ['anchorbrowser-from-anywhere', 'facebook', 'kittyfb'] };
+    }
+    if (path === '/sessions/live-session/agent/pause' && options.method === 'POST') return { status: 'paused' };
+    if (path === '/sessions/live-session/agent/resume' && options.method === 'POST') return { status: 'running' };
+    throw new Error(`Unexpected Anchor request: ${path}`);
+  } });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/session/agent`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-access-key': process.env.APP_ACCESS_KEY || '' },
+    body: JSON.stringify({ clientId: 'device', action: 'pause', session: { sessionId: 'live-session' } }),
+  });
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(payload.action, 'pause');
+  assert.equal(payload.status, 'paused');
+  const resumeResponse = await fetch(`http://127.0.0.1:${server.address().port}/api/session/agent`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-access-key': process.env.APP_ACCESS_KEY || '' },
+    body: JSON.stringify({ clientId: 'device', action: 'resume', session: { sessionId: 'live-session' } }),
+  });
+  const resumePayload = await resumeResponse.json();
+  assert.equal(resumeResponse.status, 200);
+  assert.equal(resumePayload.action, 'resume');
+  assert.equal(resumePayload.status, 'running');
+  assert.equal(calls.some((call) => call.options.method === 'DELETE'), false);
+  await new Promise((resolve) => server.close(resolve));
+});
+
 test('client persists agent continuity and passes the current session back to actions', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(source, /anchor-chat-history/);
@@ -252,6 +286,8 @@ test('client persists agent continuity and passes the current session back to ac
   assert.match(source, /restorePendingConfirmation/);
   assert.match(source, /loadSessionHistory\(true\)/);
   assert.match(source, /CLIENT_IDLE_CLOSE_MS = 30 \* 60 \* 1000/);
+  assert.match(source, /anchor-browser-share/);
+  assert.match(source, /toggleTaskPause/);
 });
 
 test('mobile UI exposes chat, live browser, full-screen input, and slash commands', async () => {
@@ -264,9 +300,15 @@ test('mobile UI exposes chat, live browser, full-screen input, and slash command
   assert.match(html, /id="session-history"/);
   assert.match(html, /id="session-replay"/);
   assert.match(html, /New parallel session/);
+  assert.match(html, /id="workspace-resizer"/);
+  assert.match(html, /id="stop-task"/);
+  assert.match(html, /id="stage-loading"/);
+  assert.match(html, /View all sessions/);
   assert.match(html, /data-command="\/browser"/);
   assert.match(css, /body\[data-mobile-view="browser"\] \.chat-card/);
   assert.match(css, /\.history-menu/);
+  assert.match(css, /\.workspace-resizer/);
+  assert.match(css, /\.stage-loading/);
 });
 
 test('health exposes deployment identity without secrets', async () => {
@@ -278,7 +320,7 @@ test('health exposes deployment identity without secrets', async () => {
   assert.equal(response.status, 200);
   assert.equal(payload.ok, true);
   assert.equal(payload.service, 'anchor-browser-from-anywhere');
-  assert.equal(payload.version, '1.4.0');
+  assert.equal(payload.version, '1.5.0');
   assert.equal(payload.sessionUser, 'kittyfb');
   assert.equal('cookies' in payload, false);
   await new Promise((resolve) => server.close(resolve));
