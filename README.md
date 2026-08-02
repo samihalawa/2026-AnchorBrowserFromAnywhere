@@ -12,6 +12,8 @@ Production: https://anchorbrowser.megawebs.com
 - Keeps parallel and recorded sessions inside a discreet History menu so the product still feels like one primary browser.
 - Stops hidden disconnected sessions after 15 minutes and the visible session after 30 minutes of in-app inactivity when no task is running.
 - Accepts natural-language tasks from a chat-style interface.
+- Loads a compact, persistent Zimo/Kitty Facebook context distilled from the official export, including the room-rental and Chinese-lesson campaigns, voice, priorities, and autonomous defaults.
+- Resolves broad actions such as `publish a story` from that context plus the live account instead of asking for content already available on Facebook.
 - Keeps chat history, drafts, pending confirmations, selected workspace view, the active workflow, queued actions, and the exact Anchor iframe session across refreshes and deployments.
 - Restores the primary browser and chat in place after reload, with a clear live/busy/attention status and a loading state while Anchor reconnects.
 - Keeps the conversation composer large and reachable on phones, collapses secondary shortcuts behind `More`, and exposes the live browser as a dedicated mobile view with in-app full screen, safe-area controls, live-view reconnect, and screen wake lock while it is open.
@@ -38,11 +40,15 @@ Required production variables:
 - `APP_ACCESS_KEY`
 - `GEMINI_API_KEY`
 - `FACEBOOK_COOKIES_JSON` (the default Cookie-Editor JSON loaded on a device that has not saved its own cookies yet)
+- `FACEBOOK_AGENT_CONTEXT` (optional JSON or plain-text override for the versioned context pack)
+- `FACEBOOK_AGENT_CONTEXT_PATH` (optional path override; defaults to `context/facebook-agent-context.json`)
 
 The repo-root `.env` is the canonical deployment configuration. Keep Coolify's
 runtime variables synchronized from it. `FACEBOOK_COOKIES_JSON` supplies the
 default cookies; cookies pasted inside the app override that default on the
 current device and remain in local storage.
+
+The versioned context pack is the default durable agent memory on every device and deployment. A `FACEBOOK_AGENT_CONTEXT` value in the canonical `.env` overrides it when a faster temporary context update is needed; the app bounds the injected text and still checks live Facebook before using time-sensitive facts.
 
 The app access password is the `APP_ACCESS_KEY` value in the repo-root `.env`.
 

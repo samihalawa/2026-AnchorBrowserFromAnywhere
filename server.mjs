@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
@@ -14,6 +15,7 @@ const APP_ACCESS_KEY = String(process.env.APP_ACCESS_KEY || '').trim();
 const DEFAULT_FACEBOOK_COOKIES = String(process.env.FACEBOOK_COOKIES_JSON || '').trim();
 const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || '').trim();
 const GEMINI_MODEL = String(process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite').trim();
+const FACEBOOK_CONTEXT_PATH = String(process.env.FACEBOOK_AGENT_CONTEXT_PATH || join(ROOT, 'context', 'facebook-agent-context.json')).trim();
 const ANCHOR_API = 'https://api.anchorbrowser.io/v1';
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta';
 const sessions = new Map();
@@ -22,6 +24,16 @@ const APP_SESSION_TAGS = ['anchorbrowser-from-anywhere', 'facebook'];
 const USER_SESSION_TAGS = [...APP_SESSION_TAGS, SESSION_USER];
 const SESSION_IDLE_MINUTES = 15;
 const SESSION_MAX_MINUTES = 1440;
+
+function loadFacebookAgentContext() {
+  const override = String(process.env.FACEBOOK_AGENT_CONTEXT || '').trim();
+  if (override) {
+    try { return JSON.parse(override); } catch { return { version: 'environment', freeform: override.slice(0, 20000) }; }
+  }
+  try { return JSON.parse(readFileSync(FACEBOOK_CONTEXT_PATH, 'utf8')); } catch { return { version: 'missing', operatingRules: [] }; }
+}
+
+const FACEBOOK_AGENT_CONTEXT = loadFacebookAgentContext();
 
 const MUTATION_WORDS = /\b(post|publish|comment|reply|send|message|like|react|join|follow|invite|delete|remove|edit|change|upload|publica|publicar|comenta|comentar|responde|responder|envia|enviar|mensaje|unirse|seguir|elimina|editar|sube)\b/i;
 
@@ -79,13 +91,74 @@ export function toolInventoryDecision(message, history = []) {
   return { mode: 'chat', reply, actionPrompt: '' };
 }
 
-export function shouldClarifyBeforeAction(decision) {
-  if (decision?.mode !== 'action') return false;
+function asksForMissingDetail(decision) {
   const reply = String(decision.reply || '');
   const actionPrompt = String(decision.actionPrompt || '');
   const asksForMissingDetail = /\b(tell me|let me know|please provide|what would you|what do you|which (?:post|story|message|person|group)|who (?:should|do)|where should|when should)\b/i.test(reply);
   const containsPlaceholder = /\b(the user provides|once (?:the user )?provides?|content to be provided|text or media (?:the user )?provides?)\b/i.test(actionPrompt);
   return asksForMissingDetail || containsPlaceholder;
+}
+
+export function shouldClarifyBeforeAction(decision) {
+  return decision?.mode === 'action' && asksForMissingDetail(decision);
+}
+
+function matchesCampaign(message, campaign) {
+  const text = String(message || '').toLowerCase();
+  return campaign?.keywords?.some((keyword) => text.includes(String(keyword).toLowerCase()));
+}
+
+export function facebookContextForRequest(message) {
+  const context = FACEBOOK_AGENT_CONTEXT;
+  if (context.freeform) return String(context.freeform).slice(0, 20000);
+  const campaigns = context.campaigns || {};
+  const directMatches = Object.values(campaigns).filter((campaign) => matchesCampaign(message, campaign));
+  const broadContentAction = /\b(story|stories|historia|historias|post|publica|publish|comment|comenta|reply|responde|lead|notification|marketplace)\b/i.test(String(message || ''));
+  const selectedCampaigns = directMatches.length
+    ? directMatches
+    : (broadContentAction ? Object.values(campaigns) : []);
+  const campaignSummary = Object.values(campaigns).map((campaign) => ({ goal: campaign.goal, knownFacts: campaign.knownFacts }));
+  const relevantExamples = selectedCampaigns.map((campaign) => ({
+    goal: campaign.goal,
+    examples: campaign.examples,
+  }));
+  return [
+    `Persistent Facebook context (${context.version || 'current'}):`,
+    JSON.stringify({
+      subject: context.subject,
+      sourceSummary: context.sourceSummary,
+      operatingRules: context.operatingRules,
+      priorities: context.priorities,
+      voice: context.voice,
+      campaigns: campaignSummary,
+      relevantExamples,
+      autonomousDefaults: context.autonomousDefaults,
+    }),
+  ].join('\n').slice(0, 16000);
+}
+
+export function canResolveWithFacebookContext(message) {
+  const text = String(message || '');
+  const explicitAction = /\b(post|publish|share|create|comment|reply|find|search|check|review|read|publica|publicar|comenta|comentar|responde|responder|busca|buscar|revisa|revisar|lee|leer)\b/i.test(text);
+  const resolvableTarget = /\b(story|stories|historia|historias|post|posts|feed|group|groups|grupo|grupos|comment|comments|comentario|comentarios|reply|replies|respuesta|respuestas|lead|leads|notification|notifications|notificacion|notificaciones|marketplace|inbox|bandeja)\b/i.test(text);
+  return explicitAction && resolvableTarget;
+}
+
+function contextualActionPrompt(message) {
+  const text = String(message || '').trim();
+  if (/\b(story|stories|historia|historias)\b/i.test(text)) {
+    return "Publish the most useful Facebook Story for Zimo Qiu's current campaign. Inspect the live account's recent posts, stories, messages, and engagement first; choose the highest-value active or overdue lane (Usera short-stay rooms or Chinese lessons); create concise natural Spanish copy in her established style; reuse suitable existing Facebook media if accessible or create a text story; omit any price, promotion, date, or availability that is not currently verified; and publish it.";
+  }
+  return `Complete this Facebook request autonomously using Zimo Qiu's saved context and the current live account: ${text} Inspect the visible target first, resolve details from current Facebook state, customize the result, and do not invent current prices, dates, availability, or recipients.`;
+}
+
+export function applyContextualAutonomy(message, decision) {
+  if (!canResolveWithFacebookContext(message) || !asksForMissingDetail(decision)) return decision;
+  return {
+    mode: 'action',
+    reply: "I have Zimo's Facebook history, campaigns, and writing style. I’ll inspect the current account, choose the most useful current content, and use suitable existing Facebook media or a text format without asking you to specify it again.",
+    actionPrompt: contextualActionPrompt(message),
+  };
 }
 
 function json(res, status, payload) {
@@ -378,7 +451,7 @@ function cleanHistory(value) {
   })).filter((item) => item.text);
 }
 
-function agentInstruction() {
+function agentInstruction(context) {
   return [
     'You are Anchor, a warm conversational AI agent with optional Facebook browser tools.',
     'You have one current primary Anchor browser agent that can freely navigate, search, scroll, read, click, and fill pages to complete concrete Facebook requests.',
@@ -390,14 +463,18 @@ function agentInstruction() {
     'Use recent conversation to resolve short follow-ups such as "do it".',
     'For mode "chat", set actionPrompt to an empty string.',
     'For mode "action", reply briefly about what you are about to do and provide a self-contained plain-language actionPrompt for the browser.',
+    'The app handles required confirmation after your decision. Never tell the browser agent to request, invoke, or wait for another confirmation.',
     'Describe the complete outcome, not individual browser steps; the browser agent decides the navigation and tools needed autonomously.',
-    'If a missing detail truly prevents action, ask for it naturally in chat. Login, two-factor, CAPTCHA, or manual review can be completed by the user in the same live browser session.',
+    'Use the persistent Facebook context and inspect the live account to resolve content, target, tone, priority, and existing-media choices whenever possible.',
+    'A clear high-level request such as "publish a story" is actionable: decide the best current story from context and live activity. Do not ask the user what photo, video, or text to use when existing Facebook media or a text story can complete it.',
+    'If an indispensable detail still truly prevents action after using context and live state, ask for it naturally in chat. Login, two-factor, CAPTCHA, or manual review can be completed by the user in the same live browser session.',
     'Whenever your reply asks the user for a missing detail, choose mode "chat" and leave actionPrompt empty. Never launch the browser while waiting for that answer.',
     'Obey requested output formats. If the user asks for JSON, return valid JSON text in reply and preserve the subject from recent conversation.',
     'The actionPrompt must include the complete requested outcome, including any publish, comment, send, or other visible change; never replace it with only a search step.',
     'Never put JSON, function calls, tool syntax, or code in actionPrompt.',
     'Never claim that a Facebook action completed; the browser tool will report the observed result.',
     'Use the user\'s language and keep replies concise.',
+    context,
   ].join(' ');
 }
 
@@ -417,7 +494,7 @@ function parseAgentDecision(payload) {
   return { mode, reply, actionPrompt };
 }
 
-async function converseWithGemini(message, history) {
+async function converseWithGemini(message, history, context = facebookContextForRequest(message)) {
   if (!GEMINI_API_KEY) throw new Error('The conversational agent is not configured.');
   const contents = cleanHistory(history).map((item) => ({
     role: item.role === 'assistant' ? 'model' : 'user',
@@ -428,7 +505,7 @@ async function converseWithGemini(message, history) {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: agentInstruction() }] },
+      systemInstruction: { parts: [{ text: agentInstruction(context) }] },
       contents,
       generationConfig: {
         responseMimeType: 'application/json',
@@ -460,9 +537,10 @@ function executionPrompt(prompt, isWrite, history = []) {
     'Work only inside the current Facebook browser session.',
     'Act autonomously: navigate, search, scroll, inspect, and use the browser tools needed to complete the full request without asking for step-by-step permission.',
     conversation ? `Recent conversation for context:\n${conversation}` : '',
+    facebookContextForRequest(prompt),
     `User request: ${prompt}`,
     isWrite
-      ? 'The user reviewed and explicitly confirmed this exact external action. Execute only that action.'
+      ? 'The user reviewed and explicitly confirmed this exact external action. Execute only that action without requesting or invoking another confirmation.'
       : 'This is read-only. Do not post, comment, message, join, react, edit, or delete anything.',
     'Use the existing logged-in account. Ask for human input only when login, two-factor authentication, CAPTCHA, or an indispensable missing value blocks progress; keep the current page open for that input.',
     'At the end, report the exact Facebook page, what visibly happened, and any pending admin approval.',
@@ -512,7 +590,7 @@ export function createApp({ agentResponder = converseWithGemini, anchorRequest =
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     try {
       if (url.pathname === '/health') {
-        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), agentConfigured: Boolean(GEMINI_API_KEY), sessionUser: SESSION_USER, version: '1.6.0' });
+        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), agentConfigured: Boolean(GEMINI_API_KEY), agentContextVersion: FACEBOOK_AGENT_CONTEXT.version || 'environment', sessionUser: SESSION_USER, version: '1.7.0' });
       }
       if (url.pathname.startsWith('/api/') && !authorized(req)) return json(res, 401, { ok: false, error: 'Access key required.' });
 
@@ -602,13 +680,16 @@ export function createApp({ agentResponder = converseWithGemini, anchorRequest =
         const input = await bodyJson(req);
         const message = String(input.message || '').trim();
         if (!message) return json(res, 400, { ok: false, error: 'Write a message first.' });
+        const requestContext = facebookContextForRequest(message);
         let decision = toolInventoryDecision(message, input.history)
-          || await agentResponder(message.slice(0, 4000), input.history);
+          || await agentResponder(message.slice(0, 4000), input.history, requestContext);
         if (isAgentConversation(message)) {
           decision.mode = 'chat';
           decision.actionPrompt = '';
           const activePrompt = String(input.activeWorkflow?.prompt || '').trim();
           if (activePrompt) decision.reply = `I’m currently working on this in the same browser session: ${activePrompt}`;
+        } else if (canResolveWithFacebookContext(message) && asksForMissingDetail(decision)) {
+          decision = applyContextualAutonomy(message, decision);
         } else if (shouldClarifyBeforeAction(decision)) {
           decision = { ...decision, mode: 'chat', actionPrompt: '' };
         }

@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
   classifyIntent,
+  canResolveWithFacebookContext,
   createApp,
+  facebookContextForRequest,
   isAgentConversation,
   providerLiveViewUrl,
   recoverableLiveViewUrl,
@@ -79,13 +81,19 @@ test('agent-status questions remain conversational even if the model misroutes t
   await new Promise((resolve) => server.close(resolve));
 });
 
-test('a missing write detail remains conversational and never starts a browser action', async () => {
+test('saved Facebook context resolves a high-level story request without a generic question', async () => {
   const decision = {
     mode: 'action',
     reply: "Tell me what you'd like to share and I can publish it.",
     actionPrompt: 'Create a Facebook story containing the text or media the user provides.',
   };
   assert.equal(shouldClarifyBeforeAction(decision), true);
+  assert.equal(canResolveWithFacebookContext('publish a story'), true);
+  const context = facebookContextForRequest('publish a story');
+  assert.match(context, /Zimo Qiu/);
+  assert.match(context, /short-stay rooms in Usera/);
+  assert.match(context, /Chinese lessons/);
+  assert.match(context, /conflicting prices/i);
   const server = createApp({ agentResponder: async () => decision });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -95,10 +103,15 @@ test('a missing write detail remains conversational and never starts a browser a
     body: JSON.stringify({ message: 'publish a story', history: [] }),
   });
   const payload = await response.json();
-  assert.equal(payload.mode, 'chat');
-  assert.equal(payload.actionPrompt, '');
-  assert.match(payload.reply, /tell me what/i);
+  assert.equal(payload.mode, 'action');
+  assert.match(payload.actionPrompt, /most useful Facebook Story/i);
+  assert.match(payload.actionPrompt, /existing Facebook media|text story/i);
+  assert.doesNotMatch(payload.reply, /tell me what|what would you/i);
   await new Promise((resolve) => server.close(resolve));
+});
+
+test('context does not invent a recipient for an underspecified direct message', () => {
+  assert.equal(canResolveWithFacebookContext('send her a message'), false);
 });
 
 test('tool inventory follows a JSON formatting request from conversation context', () => {
@@ -331,7 +344,8 @@ test('health exposes deployment identity without secrets', async () => {
   assert.equal(response.status, 200);
   assert.equal(payload.ok, true);
   assert.equal(payload.service, 'anchor-browser-from-anywhere');
-  assert.equal(payload.version, '1.6.0');
+  assert.equal(payload.version, '1.7.0');
+  assert.equal(payload.agentContextVersion, '2026-08-03-zimo-export');
   assert.equal(payload.sessionUser, 'kittyfb');
   assert.equal('cookies' in payload, false);
   await new Promise((resolve) => server.close(resolve));

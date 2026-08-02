@@ -1,13 +1,25 @@
 INDEX
+2026-08-03 | context-grounded broad Facebook actions | demoting underspecified content actions to chat ignores the attached Facebook history and creates repetitive questions | do inject the compact export-derived context into dialogue and execution, inspect live state, and autonomously resolve stories/posts/comments while retaining the app confirmation | don't require the user to restate content already inferable from history or Facebook | verify `publish a story` returns a concrete action without a question, confirmation appears, execution receives the context, and ordinary chat stays chat
 2026-08-03 | smartphone live-view affordances | listing iframe permissions or opening another tab does not make a 1280px remote browser comfortable on a phone | do activate in-app full screen, exact-URL reconnect, safe-area controls, and wake lock while preserving the provider session | don't create a second mobile browser route or change the shared remote viewport | verify 390px fullscreen fills the viewport, reconnect retains the exact session ID, reload restores it, and desktop keeps its existing toolbar
 2026-08-02 | provider-backed kittyfb history | client-only continuity cannot recover across devices and forbidding parallel sessions was too narrow | do tag sessions kittyfb, discover/replay them from Anchor, keep one primary view, and tuck parallel/history controls into a submenu | don't add a database or expose a permanent session-manager layout | verify a new device autoloads the newest active session, reload preserves selection, recordings play, parallel creation preserves the old session, and inactivity closes sessions
-2026-08-02 | clarification and reload continuity | an agent reply can ask for missing content while still returning action mode, and session-only persistence can omit pending/UI state | do force clarification replies to chat and persist pending confirmation, draft, selected view, collapsed state, history, workflow, queue, cookies, and exact live URL | don't launch Anchor while asking what to publish or restore only the session ID | verify underspecified publish leaves the workflow idle and reload restores chat, pending/UI state, and the same iframe session ID
+2026-08-02 | SUPERSEDED clarification-only routing and reload continuity | forcing every underspecified content action to chat was too narrow once persistent Facebook context became available | do retain full reload persistence but resolve broad actions from saved context plus live state before asking | don't launch Anchor for a truly indispensable missing recipient or value | verify context-resolvable actions reach confirmation while genuinely unresolvable requests stay chat, and reload still restores all UI/session state
 2026-08-02 | SUPERSEDED persistent single-session restriction | the continuity lesson remains, but rejecting parallel sessions conflicts with the corrected product | do keep one primary UI while allowing tagged parallel sessions under History | don't replace the main view with a visible session manager | verify chat/workflow continuity plus provider-backed parallel discovery
 2026-08-02 | conversational agent routing | sending every chat turn directly to Anchor makes greetings create browser tasks | do route every turn through conversational AI and invoke Anchor only for an explicit Facebook action | don't treat every non-write message as a read-only browser command | verify hello returns a chat reply with no workflow, a follow-up preserves context, and an explicit write reaches confirmation
 2026-08-02 | Anchor session continuity | in-memory session state and shutdown cleanup discard a still-running remote browser, while author CSS can keep a hidden empty-state overlay visible | do persist the exact live-view metadata on-device, validate the Anchor session on restore, and enforce `[hidden]` | don't terminate remote sessions during app redeploy or trust the DOM property without rendered proof | verify reload keeps the same ID, New session changes it, End session completes it, and the iframe is visibly unobscured
 2026-08-02 | Coolify Docker health checks | the slim image omits both curl and wget, so a healthy Node process is rejected as unhealthy | do keep curl installed in the production image while Coolify health checks are enabled | don't infer an app crash from repeated `starting` checks | verify Coolify reports healthy and `/health` returns the expected JSON
 2026-08-02 | chatbot scope drift | presets can tempt a fixed-task dashboard instead of the requested conversational agent | do keep the unrestricted prompt and recent chat context as the primary control surface, with presets only as optional shortcuts | don't require users to choose from predefined Facebook actions | verify any free-form prompt reaches Anchor and its result returns to the chat
 2026-08-02 | injected cookies are not authenticated proof | a valid cookie array can still open Facebook's saved-profile chooser | do inject the user-pasted cookies before navigation and keep the live view interactive for login or 2FA | don't label the account connected from cookie count or homepage URL alone | verify the current page text or agent report shows an authenticated Facebook surface
+
+## 2026-08-03 | CURRENT
+
+- project/root: `/Users/samihalawa/git/PROJECTS_CODING/2026-AnchorBrowserFromAnywhere`
+- surface/workflow: conversational routing and Anchor execution for broad Facebook actions
+- mistaken approach: treating `publish a story` as incomplete and asking for media/text even though the official Zimo export and live Facebook account contain campaign history and reusable media
+- superior approach: inject a compact export-derived context into both decision and execution, inspect current Facebook activity, and choose content autonomously while preserving the app's real-write confirmation
+- evidence: user correction; export profile `61579001435313`; importer totals 20,469 text, 4,349 message, and 2,266 Marketplace rows; production `1.6.0` reproduced the generic question with empty history
+- trigger terms: `publish a story`, `what would you like`, `all context`, `massive prompt`, `should know`, `ask again`
+- do: resolve posts/stories/comments/reviews from context plus live state; don't: reuse stale prices or invent a recipient when live state cannot identify one
+- required verification: direct production chat returns a concrete action without a question, the confirmation remains, execution receives context, and ordinary conversation creates no workflow
 
 ## 2026-08-03 | CURRENT
 
@@ -31,16 +43,16 @@ INDEX
 - do: use Anchor as durable session truth with one primary browser; don't: add DB state, surface all sessions permanently, or replace an active session when creating another
 - required verification: new sessions carry all three tags and 15-minute idle timeout, a fresh browser autoloads the active provider session, History is closed by default, replay works, parallel creation preserves the original running ID, and 30-minute inactive primary cleanup is wired
 
-## 2026-08-02 | CURRENT
+## 2026-08-02 | SUPERSEDED
 
 - project/root: `/Users/samihalawa/git/PROJECTS_CODING/2026-AnchorBrowserFromAnywhere`
 - surface/workflow: missing-detail clarification, tool inventory, and full reload continuity
 - mistaken approach: trusting the model's `action` flag when its reply is actually asking what to publish, and persisting only chat/workflow/session while losing pending confirmation, draft, selected mobile view, or collapsed iframe state
-- superior approach: deterministically demote clarification replies to chat, provide an exact tool inventory including JSON follow-ups, and persist every user-visible continuity state alongside the exact Anchor live URL
+- superior approach: retain the exact tool inventory and full workspace persistence, but first resolve broad actions from persistent context plus live Facebook; demote only truly indispensable missing details
 - evidence: attached production transcript and live `/api/chat` response returned `mode:"action"` for `publish a story` while asking for content; current client persistence inventory omitted pending/UI/draft keys
 - trigger terms: `publish a story`, `what would you like`, `Working while asking`, `in json`, `reload all saved`, `same place`
-- do: keep the browser idle until indispensable content is supplied and restore the entire workspace; don't: start a workflow from an incomplete action or reset the layout on reload
-- required verification: production dialogue returns chat for incomplete publish, JSON parses, and browser reload preserves history, pending confirmation/draft/view state, session ID, and iframe URL
+- do: keep the browser idle only when context and live state cannot resolve an indispensable value; don't: ask again for content already available in history or Facebook
+- required verification: context-resolvable publish reaches confirmation, a truly unidentified recipient remains chat, JSON parses, and browser reload preserves history, pending confirmation/draft/view state, session ID, and iframe URL
 
 ## 2026-08-02 | SUPERSEDED
 
