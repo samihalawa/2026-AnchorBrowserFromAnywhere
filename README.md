@@ -23,6 +23,7 @@ Production: https://anchorbrowser.megawebs.com
 - Uses the chat model as a persistent controller and the live browser model as an operating agent: both can make context-grounded decisions, inspect results, and revise their approach instead of replaying fixed click macros.
 - Runs read-only requests immediately.
 - Executes clear Facebook action requests directly, with Stop/Pause available while the browser agent is working.
+- Accepts photos and videos from the chat composer, uploads them into the current Anchor session as agent resources, and passes their `/uploads/...` paths to the browser agent for posts and Stories.
 - For image and Story requests, requires relevant visual media, short legible overlay text, and a final Facebook preview check instead of a plain gradient or text-only fallback.
 - Lets the user paste Cookie-Editor JSON once and saves it in that device's local storage.
 - Sends the cookie JSON only when creating/running that user's session, then injects it before Facebook opens.

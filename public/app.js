@@ -27,6 +27,7 @@ const state = {
   historyExpanded: false,
   taskPaused: Boolean(readStoredJSON('anchor-active-workflow', null)?.paused),
   browserShare: Math.min(75, Math.max(45, Number(localStorage.getItem('anchor-browser-share') || 65))),
+  attachments: [],
 };
 if (!Array.isArray(state.history)) state.history = [];
 if (!Array.isArray(state.actionQueue)) state.actionQueue = [];
@@ -40,7 +41,11 @@ const liveBrowser = $('#live-browser');
 const sessionReplay = $('#session-replay');
 const messages = $('#messages');
 const promptInput = $('#prompt');
+const mediaInput = $('#media-input');
+const attachmentList = $('#attachment-list');
 const CLIENT_IDLE_CLOSE_MS = 30 * 60 * 1000;
+const MAX_ATTACHMENTS = 6;
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 let idleCloseTimer = null;
 let wakeLock = null;
 let wakeLockRequest = null;
@@ -103,6 +108,57 @@ function setBrowserShare(value) {
 function resizeComposer() {
   promptInput.style.height = 'auto';
   promptInput.style.height = `${Math.min(promptInput.scrollHeight, 160)}px`;
+}
+
+function clearAttachments() {
+  for (const attachment of state.attachments) URL.revokeObjectURL(attachment.url);
+  state.attachments = [];
+  mediaInput.value = '';
+  renderAttachments();
+}
+
+function removeAttachment(id) {
+  const attachment = state.attachments.find((item) => item.id === id);
+  if (attachment) URL.revokeObjectURL(attachment.url);
+  state.attachments = state.attachments.filter((item) => item.id !== id);
+  renderAttachments();
+}
+
+function renderAttachments() {
+  attachmentList.replaceChildren();
+  attachmentList.hidden = state.attachments.length === 0;
+  for (const attachment of state.attachments) {
+    const chip = document.createElement('div');
+    chip.className = 'attachment-chip';
+    if (attachment.file.type.startsWith('image/')) {
+      const preview = document.createElement('img');
+      preview.src = attachment.url;
+      preview.alt = attachment.file.name;
+      chip.append(preview);
+    } else {
+      const label = document.createElement('span');
+      label.className = 'video-label';
+      label.textContent = attachment.file.name;
+      chip.append(label);
+    }
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.setAttribute('aria-label', `Remove ${attachment.file.name}`);
+    remove.textContent = '×';
+    remove.addEventListener('click', () => removeAttachment(attachment.id));
+    chip.append(remove);
+    attachmentList.append(chip);
+  }
+}
+
+function addAttachments(files) {
+  const accepted = [...files].filter((file) => /^(image|video)\//i.test(file.type));
+  const tooLarge = accepted.find((file) => file.size > MAX_ATTACHMENT_BYTES);
+  if (tooLarge) throw new Error(`${tooLarge.name} is larger than 20 MB.`);
+  const remaining = MAX_ATTACHMENTS - state.attachments.length;
+  if (accepted.length > remaining) throw new Error(`Choose no more than ${MAX_ATTACHMENTS} photos or videos at once.`);
+  state.attachments.push(...accepted.map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file) })));
+  renderAttachments();
 }
 
 function addMessage(text, role = 'assistant', error = false, track = true) {
@@ -244,6 +300,32 @@ async function api(path, options = {}) {
     throw error;
   }
   return payload;
+}
+
+async function uploadApi(path, form) {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { 'x-access-key': state.accessKey },
+    body: form,
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.error || `Upload failed (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+
+async function uploadAttachments(attachments) {
+  await ensureSession();
+  const form = new FormData();
+  form.append('clientId', state.clientId);
+  form.append('sessionId', state.session.sessionId);
+  form.append('liveViewUrl', state.session.liveViewUrl);
+  for (const attachment of attachments) form.append('files', attachment.file, attachment.file.name);
+  const payload = await uploadApi('/api/session/files', form);
+  return payload.resources || [];
 }
 
 function clearReplay() {
@@ -626,20 +708,35 @@ async function execute(prompt) {
 }
 
 async function submitPrompt(prompt) {
-  addMessage(prompt, 'user');
+  const attachments = state.attachments.slice();
+  const attachmentNames = attachments.map((item) => item.file.name);
+  const displayPrompt = attachmentNames.length ? `${prompt}\n📎 ${attachmentNames.join(', ')}` : prompt;
+  addMessage(displayPrompt, 'user');
   if (await handleCommand(prompt)) return;
   setStatus('Thinking…', 'busy');
   const conversationHistory = state.history.slice(0, -1).slice(-10);
+  const controllerMessage = attachmentNames.length
+    ? `${prompt}\n\nThe user attached these media files for this request: ${attachmentNames.join(', ')}. If this is a Facebook action, require the operating browser agent to use the attached media.`
+    : prompt;
   const agent = await api('/api/chat', {
     method: 'POST',
-    body: JSON.stringify({ message: prompt, history: conversationHistory, activeWorkflow: state.workflow }),
+    body: JSON.stringify({ message: controllerMessage, history: conversationHistory, activeWorkflow: state.workflow }),
   });
   addMessage(agent.reply);
   if (agent.mode !== 'action') {
     setStatus(state.session ? 'Browser live' : 'Ready', state.session ? 'live' : '');
     return;
   }
-  const actionPrompt = agent.actionPrompt || prompt;
+  let actionPrompt = agent.actionPrompt || prompt;
+  if (attachments.length) {
+    setStatus('Uploading media…', 'busy');
+    const resources = await uploadAttachments(attachments);
+    const paths = resources.map((resource) => resource.path).filter(Boolean);
+    if (!paths.length) throw new Error('Anchor did not return an uploaded media path.');
+    actionPrompt = `${actionPrompt}\nUse the user-attached Anchor resources in this session: ${paths.join(', ')}. These are the exact media files selected for this request.`;
+    clearAttachments();
+    addMessage(`${resources.length} media ${resources.length === 1 ? 'file is' : 'files are'} ready in the live browser.`, 'assistant', false, false);
+  }
   await execute(actionPrompt);
 }
 
@@ -703,6 +800,19 @@ promptInput.addEventListener('input', () => {
   if (state.draft) localStorage.setItem('anchor-chat-draft', state.draft);
   else localStorage.removeItem('anchor-chat-draft');
   resizeComposer();
+});
+
+$('#attach-media').addEventListener('click', () => mediaInput.click());
+mediaInput.addEventListener('change', () => {
+  try { addAttachments(mediaInput.files || []); } catch (error) { addMessage(error.message, 'assistant', true); }
+  mediaInput.value = '';
+});
+
+promptInput.addEventListener('paste', (event) => {
+  const files = [...(event.clipboardData?.files || [])].filter((file) => /^(image|video)\//i.test(file.type));
+  if (!files.length) return;
+  event.preventDefault();
+  try { addAttachments(files); } catch (error) { addMessage(error.message, 'assistant', true); }
 });
 
 document.querySelectorAll('[data-prompt]').forEach((button) => {

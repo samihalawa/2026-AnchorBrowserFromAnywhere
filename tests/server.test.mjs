@@ -353,6 +353,43 @@ test('active browser agent can be paused and resumed without ending its session'
   await new Promise((resolve) => server.close(resolve));
 });
 
+test('media attachments are uploaded into the selected Anchor session for agent use', async () => {
+  const calls = [];
+  const server = createApp({ anchorRequest: async (path, options = {}) => {
+    calls.push({ path, options });
+    if (path === '/sessions/live-session') {
+      return { session_id: 'live-session', status: 'running', tags: ['anchorbrowser-from-anywhere', 'facebook', SESSION_USER] };
+    }
+    if (path === '/sessions/live-session/agent/files' && options.method === 'POST') {
+      assert.equal(options.body instanceof FormData, true);
+      const uploaded = options.body.get('file');
+      assert.equal(uploaded.type, 'image/png');
+      assert.match(uploaded.name, /^room-[a-f0-9]{8}\.png$/);
+      return { status: 'success', message: `File saved at /uploads/${uploaded.name}` };
+    }
+    throw new Error(`Unexpected Anchor request: ${path}`);
+  } });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const form = new FormData();
+  form.append('clientId', 'device');
+  form.append('sessionId', 'live-session');
+  form.append('liveViewUrl', providerLiveViewUrl('live-session'));
+  form.append('files', new Blob(['image-bytes'], { type: 'image/png' }), 'room.png');
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/session/files`, {
+    method: 'POST',
+    headers: { 'x-access-key': process.env.APP_ACCESS_KEY || '' },
+    body: form,
+  });
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.resources.length, 1);
+  assert.match(payload.resources[0].path, /^\/uploads\/room-[a-f0-9]{8}\.png$/);
+  assert.equal(payload.resources[0].type, 'image/png');
+  assert.equal(calls.filter((call) => call.path.endsWith('/agent/files')).length, 1);
+  await new Promise((resolve) => server.close(resolve));
+});
+
 test('client persists agent continuity and passes the current session back to actions', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(source, /anchor-chat-history/);
@@ -384,6 +421,9 @@ test('mobile UI exposes chat, live browser, native full screen, reconnect, wake 
   assert.match(html, /New parallel session/);
   assert.match(html, /id="workspace-resizer"/);
   assert.match(html, /id="stop-task"/);
+  assert.match(html, /id="attach-media"/);
+  assert.match(html, /id="media-input" type="file" accept="image\/\*,video\/\*" multiple/);
+  assert.match(html, /id="attachment-list"/);
   assert.match(html, /id="stage-loading"/);
   assert.match(html, /id="stage-controls"/);
   assert.match(html, /id="refresh-live-view"/);
@@ -399,9 +439,14 @@ test('mobile UI exposes chat, live browser, native full screen, reconnect, wake 
   assert.match(css, /\.browser-stage:fullscreen/);
   assert.match(css, /\.stage-controls/);
   assert.match(css, /\.command-hint button \{ min-width: 2\.75rem; min-height: 2\.75rem;/);
+  assert.match(css, /\.attach-media \{[^}]*width: 2\.75rem;[^}]*height: 2\.75rem;/s);
   assert.match(client, /requestFullscreen/);
   assert.match(client, /navigator\.wakeLock/);
   assert.match(client, /Reconnecting the live view/);
+  assert.match(client, /uploadAttachments/);
+  assert.match(client, /new FormData\(\)/);
+  assert.match(client, /\/api\/session\/files/);
+  assert.match(client, /Use the user-attached Anchor resources/);
 });
 
 test('health exposes deployment identity without secrets', async () => {
@@ -414,7 +459,7 @@ test('health exposes deployment identity without secrets', async () => {
   assert.equal(payload.ok, true);
   assert.equal(payload.service, 'anchor-browser-from-anywhere');
   assert.equal(payload.profileConfigured, true);
-  assert.equal(payload.version, '1.9.1');
+  assert.equal(payload.version, '1.10.0');
   assert.equal(payload.agentContextVersion, 'test-runtime-config');
   assert.equal(payload.sessionUser, SESSION_USER);
   assert.equal('cookies' in payload, false);

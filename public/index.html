@@ -108,10 +108,17 @@
         </div>
         <form class="composer" id="composer">
           <label for="prompt">Your request</label>
-          <textarea id="prompt" rows="2" placeholder="Ask anything, or tell the agent what to do on Facebook…" required></textarea>
-          <button type="submit" aria-label="Send request">
+          <div class="composer-entry">
+            <button class="attach-media" id="attach-media" type="button" aria-label="Add photos or videos" title="Add photos or videos">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17V7M7 12l5-5 5 5M5 20h14"/></svg>
+            </button>
+            <input id="media-input" type="file" accept="image/*,video/*" multiple hidden>
+            <textarea id="prompt" rows="2" placeholder="Ask anything, or tell the agent what to do on Facebook…" required></textarea>
+          </div>
+          <button class="send-button" type="submit" aria-label="Send request">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </button>
+          <div class="attachment-list" id="attachment-list" aria-live="polite" hidden></div>
           <div class="composer-meta">
             <p class="typing-hint">Enter to send · Shift+Enter for a new line</p>
             <button class="stop-task" id="stop-task" type="button" hidden>Stop task</button>

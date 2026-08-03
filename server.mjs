@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { extname, join, normalize } from 'node:path';
+import { basename, extname, join, normalize } from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import WebSocket from 'ws';
@@ -23,6 +24,9 @@ const APP_SESSION_TAGS = ['anchorbrowser-from-anywhere', 'facebook'];
 const USER_SESSION_TAGS = [...APP_SESSION_TAGS, SESSION_USER];
 const SESSION_IDLE_MINUTES = 15;
 const SESSION_MAX_MINUTES = 1440;
+const MAX_MEDIA_FILES = 6;
+const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
+const MAX_MEDIA_REQUEST_BYTES = MAX_MEDIA_FILES * MAX_MEDIA_BYTES + 1024 * 1024;
 
 function loadFacebookAgentContext(raw = process.env.FACEBOOK_AGENT_CONTEXT) {
   const configured = String(raw || '').trim();
@@ -126,6 +130,18 @@ async function bodyJson(req) {
   return body.trim() ? JSON.parse(body) : {};
 }
 
+async function bodyFormData(req) {
+  const contentLength = Number(req.headers['content-length'] || 0);
+  if (contentLength > MAX_MEDIA_REQUEST_BYTES) throw new Error('Media upload is too large.');
+  const request = new Request(`http://${req.headers.host || 'localhost'}${req.url || '/'}`, {
+    method: req.method,
+    headers: req.headers,
+    body: Readable.toWeb(req),
+    duplex: 'half',
+  });
+  return request.formData();
+}
+
 function authorized(req) {
   if (!APP_ACCESS_KEY) return true;
   return String(req.headers['x-access-key'] || '') === APP_ACCESS_KEY;
@@ -139,9 +155,10 @@ function anchorHeaders(jsonBody = false) {
 
 async function anchorFetch(path, options = {}) {
   if (!ANCHOR_API_KEY) throw new Error('Anchor Browser is not configured.');
+  const multipart = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const response = await fetch(`${ANCHOR_API}${path}`, {
     ...options,
-    headers: { ...anchorHeaders(Boolean(options.body)), ...(options.headers || {}) },
+    headers: { ...anchorHeaders(Boolean(options.body) && !multipart), ...(options.headers || {}) },
   });
   const text = await response.text();
   let payload;
@@ -151,6 +168,13 @@ async function anchorFetch(path, options = {}) {
     throw new Error(`Anchor Browser ${response.status}: ${String(detail).slice(0, 500)}`);
   }
   return payload?.data ?? payload;
+}
+
+function resourceFileName(file, index) {
+  const original = basename(String(file?.name || `media-${index + 1}`));
+  const extension = extname(original).replace(/[^a-zA-Z0-9.]/g, '').slice(0, 10);
+  const stem = basename(original, extname(original)).replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 70) || `media-${index + 1}`;
+  return `${stem}-${crypto.randomUUID().slice(0, 8)}${extension}`;
 }
 
 function parseCookies(rawCookies) {
@@ -544,7 +568,7 @@ export function createApp({ agentResponder = converseWithGemini, agentContext = 
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     try {
       if (url.pathname === '/health') {
-        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), profileConfigured: Boolean(profileName), agentConfigured: Boolean(GEMINI_API_KEY), agentContextVersion: agentContext.version || 'environment', sessionUser: SESSION_USER, version: '1.9.1' });
+        return json(res, 200, { ok: true, service: 'anchor-browser-from-anywhere', anchorConfigured: Boolean(ANCHOR_API_KEY), profileConfigured: Boolean(profileName), agentConfigured: Boolean(GEMINI_API_KEY), agentContextVersion: agentContext.version || 'environment', sessionUser: SESSION_USER, version: '1.10.0' });
       }
       if (url.pathname.startsWith('/api/') && !authorized(req)) return json(res, 401, { ok: false, error: 'Access key required.' });
 
@@ -620,6 +644,29 @@ export function createApp({ agentResponder = converseWithGemini, agentContext = 
         if (!record) return json(res, 404, { ok: false, error: 'The live browser session is no longer available.' });
         const result = await anchorRequest(`/sessions/${encodeURIComponent(record.sessionId)}/agent/${action}`, { method: 'POST' });
         return json(res, 200, { ok: true, action, status: result?.status || action });
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/session/files') {
+        const form = await bodyFormData(req);
+        const clientId = String(form.get('clientId') || SESSION_USER).slice(0, 100);
+        const sessionId = String(form.get('sessionId') || '').trim();
+        const liveViewUrl = String(form.get('liveViewUrl') || '').trim();
+        const record = await restoreFacebookSession(clientId, { sessionId, liveViewUrl }, anchorRequest);
+        if (!record) return json(res, 404, { ok: false, error: 'The selected Anchor session is no longer available.' });
+        const files = form.getAll('files').filter((file) => file && typeof file.arrayBuffer === 'function');
+        if (!files.length) return json(res, 400, { ok: false, error: 'Choose at least one photo or video.' });
+        if (files.length > MAX_MEDIA_FILES) return json(res, 400, { ok: false, error: `Choose no more than ${MAX_MEDIA_FILES} files at once.` });
+        const resources = [];
+        for (const [index, file] of files.entries()) {
+          if (!/^(image|video)\//i.test(String(file.type || ''))) return json(res, 400, { ok: false, error: `${file.name || 'This file'} is not a photo or video.` });
+          if (Number(file.size || 0) > MAX_MEDIA_BYTES) return json(res, 400, { ok: false, error: `${file.name || 'This file'} is larger than 20 MB.` });
+          const name = resourceFileName(file, index);
+          const upload = new FormData();
+          upload.append('file', file, name);
+          await anchorRequest(`/sessions/${encodeURIComponent(record.sessionId)}/agent/files`, { method: 'POST', body: upload });
+          resources.push({ name, path: `/uploads/${name}`, type: String(file.type || ''), size: Number(file.size || 0) });
+        }
+        return json(res, 200, { ok: true, resources });
       }
 
       if (req.method === 'POST' && url.pathname === '/api/preview') {

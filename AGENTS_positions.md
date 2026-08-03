@@ -1,4 +1,5 @@
 INDEX
+2026-08-03 | mobile media into Anchor agent resources | the remote live iframe cannot directly see a phone's local files, and visual prompts alone do not upload media | do attach media in app chat, proxy multipart to the selected session's `/agent/files`, and pass returned `/uploads/...` paths to `browser-use` | don't interpret missing iframe upload as an admin ban or promise an image from text alone | verify selected thumbnails, provider resource listing, action-path injection, and a visible Facebook preview
 2026-08-03 | authenticated Anchor profile continuity | a stale hardcoded profile plus cookie injection can restore a chooser instead of the authenticated account | do configure a profile saved from a visibly authenticated session through `.env` | don't hardcode a provider profile name or infer login from cookies | verify a fresh profile-only session visibly opens the authenticated Facebook feed
 2026-08-03 | persistent decision-making agent | treating chat as a classifier and Anchor as a fixed macro loses the natural agent behavior the user expects | do let the controller reason about tool use and let the browser agent inspect, choose, adapt, and verify | don't reduce free-form requests to hardcoded workflows or click scripts | verify ordinary dialogue stays conversational and explicit outcomes reach an adaptive live-browser prompt
 2026-08-03 | direct actions plus visual preview truth | an extra approval click blocks the requested autonomous workflow, while promising an image without checking the Facebook preview produces an ugly text-only story | do execute clear actions directly, retain Stop/Pause, require relevant media for visual requests, and verify the final preview before sharing | don't show a confirmation dialog or publish a plain gradient when an image was requested | verify direct `/api/run`, zero confirmation artifacts, paused unwanted task, runtime visual rules, and live action start
@@ -14,6 +15,17 @@ INDEX
 2026-08-02 | Coolify Docker health checks | the slim image omits both curl and wget, so a healthy Node process is rejected as unhealthy | do keep curl installed in the production image while Coolify health checks are enabled | don't infer an app crash from repeated `starting` checks | verify Coolify reports healthy and `/health` returns the expected JSON
 2026-08-02 | chatbot scope drift | presets can tempt a fixed-task dashboard instead of the requested conversational agent | do keep the unrestricted prompt and recent chat context as the primary control surface, with presets only as optional shortcuts | don't require users to choose from predefined Facebook actions | verify any free-form prompt reaches Anchor and its result returns to the chat
 2026-08-02 | injected cookies are not authenticated proof | a valid cookie array can still open Facebook's saved-profile chooser | do inject the user-pasted cookies before navigation and keep the live view interactive for login or 2FA | don't label the account connected from cookie count or homepage URL alone | verify the current page text or agent report shows an authenticated Facebook surface
+
+## 2026-08-03 | CURRENT
+
+- project/root: `/Users/samihalawa/git/PROJECTS_CODING/2026-AnchorBrowserFromAnywhere`
+- surface/workflow: photos and videos selected in app chat for Facebook posts and Stories
+- mistaken approach: expecting the cross-origin remote-browser iframe or a visual instruction to transfer a phone's local file, then interpreting the missing resource as an admin-disabled upload capability
+- superior approach: select media beside the chat prompt, proxy multipart bytes through the app to the current session's official Anchor agent-resource endpoint, and include the returned `/uploads/...` paths in the `browser-use` action
+- evidence: official Anchor agent-resource API and the previously successful room Story upload/render; source inspection showed no attachment input or multipart route despite advertising an upload tool
+- trigger terms: `image`, `photo`, `video`, `attachment`, `file upload`, `admin disabled`, `story`, `post`
+- do: show local thumbnails and bind resources to the selected session/action; don't: rely on the iframe file chooser or claim uploaded media before provider readback
+- required verification: smartphone-sized attachment control, provider resource metadata, the exact resource path in the task prompt, and the selected media visibly present in the final Facebook preview
 
 ## 2026-08-03 | CURRENT
 
